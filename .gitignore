@@ -1,0 +1,9 @@
+#we ignore the venv
+venv
+
+# local run data - created by common.ensure_data_dirs()
+data/
+
+# python bytecode
+__pycache__/
+*.py[cod]
