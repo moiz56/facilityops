@@ -12,9 +12,9 @@ config/                 YAML configuration (not code)
   report.yaml           report-level settings
   branding.yaml         logo, colours, headers
   assets/logo.png
-data/                   local run data - git-ignored, created automatically
+data/                   local run data - git-ignored
   records/              input run records
-  evidence/             input evidence images
+  <run_id>/evidence/    that run's evidence tree, laid out as its paths record it
 output/                 generated PDFs and manifests
 src/
   common/               shared layer - imported by report, imports nothing from it
@@ -47,15 +47,25 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -e ".[dev]"
 ```
-
-WeasyPrint needs system libraries (Pango, Cairo, GDK-PixBuf) that pip does not
-install; see the WeasyPrint documentation for your platform.
-
 ## Data directories
 
-`data/`, `data/records/` and `data/evidence/` are git-ignored and created on demand
-by `common.ensure_data_dirs()`, which `src/report/__init__.py` calls. No `.gitkeep`
+`data/` and `output/` are created on demand by
+`common.ensure_runtime_dirs()`, which `src/report/__init__.py` calls. No `.gitkeep`
 placeholders are needed.
+
+A supplied run keeps the layout its recorded paths imply, so that the rewrite rule
+in section 2.3 of the brief resolves with `path_prefix: /run-files` unchanged:
+
+```
+data/
+  records/run.json
+  20260728_144120-sis_facility_checkpoint_route/
+    evidence/SIS Facility Checkpoint Route/checkpoint_1/checkpoint_1_N.jpg
+```
+
+Records and evidence are separate inputs - the engine takes a record path and an
+evidence root as two arguments - so records collect in one folder while each run's
+evidence keeps the shape its recorded paths imply. The evidence root is `data/`.
 
 ## Tests
 

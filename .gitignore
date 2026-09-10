@@ -1,7 +1,7 @@
 #we ignore the venv
 venv
 
-# local run data - created by common.ensure_data_dirs()
+# local run data - created by common.ensure_runtime_dirs()
 data/
 
 # python bytecode

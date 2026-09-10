@@ -1,34 +1,13 @@
 # Decisions
 
-## Build backend: Hatchling
+1. Hatchling used to build backend 
 
-We use Hatchling as the build backend, declared in `pyproject.toml`:
+2. branding.yaml is a standalone file but the config/report.yaml in the document contains a branding section, for now I have put both in the config.yaml making branding.yaml empty (can be discussed)
 
-```toml
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-```
+3. common/schema.py implemented, some helper classes were made like Pose, Point2D to make it easier to structure data
 
-Reasons:
+# Questions to raise
 
-- Configuration only. No `setup.py` or `setup.cfg`; everything lives in
-  `pyproject.toml` alongside the PEP 621 `[project]` metadata.
-- Clean src-layout support. The code sits under `src/`, but is imported as
-  `common.*` and `report.*`. Hatchling handles this with two short blocks:
-
-  ```toml
-  [tool.hatch.build.targets.wheel]
-  packages = ["src/common", "src/report"]
-
-  [tool.hatch.build.targets.wheel.sources]
-  "src" = ""
-  ```
-
-  `packages` selects exactly the two trees to ship; `sources` strips the `src/`
-  prefix so `src/report/cli.py` installs as `report/cli.py`.
-- Template files under `src/report/templates/` (`.j2`, `.css`) are picked up as part
-  of the package tree without a separate package-data declaration.
-
-Dependencies are pinned exactly (`==`) rather than with ranges, so resolution is
-reproducible across machines. Bumps are deliberate and manual.
+1. branding.yaml is a standalone file but the config.yaml in the document contains a branding section, for now I have put both in the config.yaml making branding.yaml empty but is this the way to go
+2. raise question as to how it is expected the data is fed
+3. questions regarding objects , the one shown over there. for now I have given each a deterministic shape but if they are dynamic schema.py must be adjusted
