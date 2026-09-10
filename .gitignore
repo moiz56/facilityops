@@ -1,9 +1,13 @@
 #we ignore the venv
 venv
 
-# local run data - created by common.ensure_runtime_dirs()
-data/
+# local run data - created by common.ensure_runtime_dirs().
+# Anchored to the root: tests/data holds committed fixtures and must not match.
+/data/
+/output/
+/tests/data
 
 # python bytecode
 __pycache__/
 *.py[cod]
+.pytest_cache
