@@ -17,7 +17,7 @@ class ConfigError(Exception):
     """config/report.yaml is missing, unreadable, or lacks a setting the engine needs."""
 
 
-def _load_config(path: Path) -> dict:
+def load_config(path: Path) -> dict:
     """Read a config file, or raise ConfigError saying what is wrong with it."""
     try:
         text = path.read_text(encoding="utf-8")
@@ -35,7 +35,7 @@ def _load_config(path: Path) -> dict:
     return config
 
 
-def _setting(config: dict, section: str, key: str):
+def setting(config: dict, section: str, key: str):
     """Return one required setting, or raise ConfigError naming the one that is missing."""
     block = config.get(section)
     if not isinstance(block, dict) or key not in block:
@@ -43,16 +43,16 @@ def _setting(config: dict, section: str, key: str):
     return block[key]
 
 
-_config = _load_config(CONFIG_PATH)
+_config = load_config(CONFIG_PATH)
 
 #: The compass directions and thermal marker, from config/report.yaml.
-_directions = _setting(_config, "evidence", "directions")
+_directions = setting(_config, "evidence", "directions")
 if not isinstance(_directions, list) or not _directions:
     raise ConfigError(f"{CONFIG_PATH}: 'evidence.directions' must be a non-empty list")
 
 DIRECTIONS: tuple[str, ...] = tuple(_directions)
-THERMAL_SUFFIX: str = _setting(_config, "evidence", "thermal_suffix")
-PATH_PREFIX: str = _setting(_config, "paths", "path_prefix")
+THERMAL_SUFFIX: str = setting(_config, "evidence", "thermal_suffix")
+PATH_PREFIX: str = setting(_config, "paths", "path_prefix")
 
 
 @dataclass(frozen=True)

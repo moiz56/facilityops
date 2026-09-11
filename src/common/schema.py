@@ -1,30 +1,15 @@
-"""Dataclasses for section 2 of the brief: the run record data contract.
+"""The shape of a run record.
 
-Shape only. No properties, no methods, no logging. Parsing and every reading of
-the data live in loader.py, evidence path rewriting in paths.py, and the trust
-rules in report/gaps.py, which section 5.4 requires to be the one place that
-decides what a gap is.
+Shape only: no properties, no methods, no logging. Reading the data is
+loader.py's job, rewriting evidence paths is paths.py's, and deciding what
+counts as a gap is report/gaps.py's.
 
-Where each type comes from:
+Two rules throughout:
 
-    2.1   Record                          the whole run
-    2.2   Checkpoint, Pose                one stop on the route
-    2.4   Finding                         something the run found
-    2.5   SensorAlert, Point2D            a threshold breach during the run
-    2.6   SensorSample, SampleSensor      continuous telemetry
-    2.7   Event                           the run's own log
-    2.8   SensorBlock, RawSensor,         one sensor hub reading
-          SensorWarning, Accelerometer,
-          Environment, Particulate
-
-          
-Two rules apply throughout:
-
-- Every type is frozen and every sequence is a tuple. Section 5.2 requires that
-  no pipeline stage mutates its input.
-- Status, verdict and severity fields are plain strings, never Enums. Section
-  11 requires an unlisted value to be rendered verbatim and recorded, never
-  mapped onto a known one. GapType, in report/gaps.py, is the one closed set.
+- Every type is frozen and every sequence is a tuple, so no pipeline stage can
+  change what it was given.
+- Status, verdict and severity are plain strings, never Enums. A value nobody
+  listed has to render as written rather than being mapped onto a known one.
 """
 
 from __future__ import annotations
@@ -50,17 +35,14 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Coordinates
+# --- coordinates ---
 #
-# Two shapes, deliberately two types. Section 2.5 warns that one parser must
-# not assume all four keys, so loader.py reads them with separate functions.
-# ---------------------------------------------------------------------------
+# Two shapes, so two types: nothing should assume all four keys are there.
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Pose:
-    """Where a checkpoint or a finding is: x, y, z and yaw in the map frame (2.2)."""
+    """Where a checkpoint or a finding is: x, y, z and yaw in the map frame."""
 
     x: float | None = None
     y: float | None = None
@@ -70,10 +52,10 @@ class Pose:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Point2D:
-    """Where a sensor alert or a telemetry sample is: x and y only (2.5).
+    """Where an alert or a sample is: x and y only.
 
-    Alerts and samples record two keys where checkpoints record four. There is
-    no z and no yaw, and none is invented.
+    Alerts and samples record two keys where checkpoints record four. No z and
+    no yaw, and neither is invented.
     """
 
     x: float | None = None
@@ -81,7 +63,7 @@ class Point2D:
 
 
 # ---------------------------------------------------------------------------
-# The pieces of a sensor reading (2.8)
+# The pieces of a sensor reading
 #
 # Each measurement block is governed by a device health flag in RawSensor. When
 # a flag is false the block's values are placeholders, not measurements - the
@@ -113,7 +95,7 @@ class Environment:
 class Particulate:
     """Airborne particulate counts. Governed by sps30_ok.
 
-    In the reference run sps30_ok is false at every checkpoint and every value
+    In the reference run that flag is false at every checkpoint and every value
     here reads 0.0. Those zeros are an offline sensor, not clean air.
     """
 
@@ -135,13 +117,11 @@ class SensorWarning:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RawSensor:
-    """The device block: health flags, and duplicates of everything else.
+    """The device block: three health flags, two status strings, and duplicates.
 
-    Only five fields here are usable: the three device health flags, plus
-    air_status and vibration_status. Everything else duplicates the structured
-    blocks in flat form, and those blocks are the source of truth (2.8). The
-    duplicates are kept in `extra` so nothing in the record is lost, but no
-    code reads a measurement from them.
+    Everything else here repeats the structured blocks in flat form, and those
+    blocks are what to read. The duplicates are kept in `extra` so nothing is
+    lost, but no measurement is ever taken from them.
     """
 
     device: str | None = None
@@ -166,7 +146,7 @@ class RawSensor:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SensorBlock:
-    """What the sensor hub reported at one checkpoint (2.8).
+    """What the sensor hub reported at one checkpoint.
 
     `ok`, `status` and `sensor_hub_reachable` say whether the reading can be
     trusted at all; `age_seconds` says how stale it was when recorded.
@@ -188,11 +168,11 @@ class SensorBlock:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SampleSensor:
-    """What one telemetry sample carries (2.6): the three measurement blocks only.
+    """A telemetry sample's reading: the three measurement blocks only.
 
-    No raw, no warnings, no ok, no age_seconds. Because it has no device flags,
-    the sub-device trust rule cannot be asked of a sample - which is the point
-    of keeping it a separate type from SensorBlock.
+    No raw, no warnings, no ok, no age_seconds. With no device flags there is
+    no way to ask whether a sample can be trusted, which is why this is a
+    separate type from SensorBlock.
     """
 
     accelerometer: Accelerometer | None = None
@@ -207,16 +187,15 @@ class SampleSensor:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Checkpoint:
-    """One stop on the route: what the robot saw there and what it recorded (2.2).
+    """One stop on the route.
 
     `status` says whether the robot got there (COMPLETED or MISSED).
-    `result_status` is the verdict there (PASS, FAIL or WARN). They are
-    independent: COMPLETED and FAIL is the most common failure in this data,
-    and COMPLETED with no evidence at all is different again from MISSED.
+    `result_status` is the verdict (PASS, FAIL or WARN). They are independent:
+    COMPLETED with FAIL is the most common failure in this data, and COMPLETED
+    with no evidence at all is different again from MISSED.
 
-    `confidence` is None when no confidence was produced. Section 2.9 gives 0.0
-    that meaning, and loader.py applies it, so the report renders "not scored"
-    for both.
+    `confidence` is None when none was produced. A recorded 0.0 means the same
+    thing and the loader reads it as None, so both render as "not scored".
     """
 
     checkpoint_id: str
@@ -229,11 +208,11 @@ class Checkpoint:
     missed_reason: str | None = None        # populated when status is MISSED
     observed: str | None = None             # normal_scene, no_evidence, or a label
     expected_text: str | None = None
-    notes: str | None = None                # free text, rendered verbatim (2.9)
+    notes: str | None = None                # free text, rendered verbatim
     rule_type: str | None = None
     confidence: float | None = None
     coordinates: Pose | None = None
-    evidence_images: tuple[str, ...] = ()   # paths as recorded; paths.py rewrites them
+    evidence_images: tuple[str, ...] = ()   # as recorded; paths.py rewrites them
     annotated_images: tuple[str, ...] = ()
     detections: tuple[Finding, ...] = ()    # same shape as a run-level finding
     sensor: SensorBlock | None = None
@@ -241,14 +220,14 @@ class Checkpoint:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Finding:
-    """Something the run found, tied to the checkpoint it came from (2.4).
+    """Something the run found, tied to the checkpoint it came from.
 
     Also the shape of a checkpoint's `detections` and of `live_detections`.
 
-    `severity` is info, warning or fail - lowercase, unlike the status enums
-    elsewhere. `status` is logged, acknowledged or abstained; an abstained
-    finding is one the detector declined to call, and is shown as requiring
-    human review rather than as a confirmed finding, and never dropped.
+    `severity` is info, warning or fail - lowercase, unlike the status values
+    elsewhere. `status` is logged, acknowledged or abstained. An abstained
+    finding is one the detector would not call: it is shown as needing human
+    review rather than as a confirmed finding, and never dropped.
     """
 
     finding_id: str
@@ -267,11 +246,11 @@ class Finding:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SensorAlert:
-    """A threshold breach logged during the run, independent of any checkpoint (2.5).
+    """A threshold breach logged during the run, independent of any checkpoint.
 
-    `nearest_checkpoint_id` is spatial proximity, not attribution: an alert near
-    checkpoint 5 was not necessarily caused by anything at checkpoint 5. It is
-    rendered as "nearest checkpoint", never as "at checkpoint".
+    `nearest_checkpoint_id` is proximity, not attribution: an alert near
+    checkpoint 5 was not necessarily caused by anything at checkpoint 5. It
+    renders as "nearest checkpoint", never as "at checkpoint".
     """
 
     code: str
@@ -287,10 +266,10 @@ class SensorAlert:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SensorSample:
-    """One continuous telemetry reading, roughly one every two seconds (2.6).
+    """One telemetry reading, roughly one every two seconds.
 
-    Samples are never rendered individually. derive.py rolls them up per zone
-    into the min, mean and max of the table in 3.4.
+    Samples are never rendered one by one. derive.py rolls them up per zone
+    into a min, mean and max.
     """
 
     timestamp: datetime | None = None
@@ -304,14 +283,14 @@ class SensorSample:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Event:
-    """One entry in the run's own log (2.7).
+    """One entry in the run's own log.
 
-    Run-level events - run_started and run_completed - simply omit
-    checkpoint_id, checkpoint_name, result_status and evidence_count. Those
-    keys are absent rather than null.
+    Run-level events - run_started and run_completed - omit checkpoint_id,
+    checkpoint_name, result_status and evidence_count entirely. Those keys are
+    absent rather than null.
 
-    `evidence_count` is a declared count and must be cross-checked against the
-    checkpoint's actual evidence_images; a mismatch is a gap (TA-25).
+    `evidence_count` is a claim, to be checked against the checkpoint's actual
+    evidence_images. A mismatch is a gap.
     """
 
     event_id: str
@@ -332,18 +311,18 @@ class Event:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Record:
-    """One inspection run: the root of the data contract (2.1).
+    """One inspection run.
 
-    The seven count fields are declared, not derived. They are what the robot
-    reported and may disagree with the arrays beside them - reconciling the two
-    is derive.py's job, and printing both figures where they differ is 3.3's.
+    The seven count fields are declared, not derived: they are what the robot
+    reported, and may disagree with the arrays beside them. Reconciling the two
+    is derive.py's job, and both figures get printed where they differ.
 
-    `checkpoints` stays a tuple and is never keyed by checkpoint_id anywhere in
-    the pipeline. Duplicate ids occur, and must be reported rather than
-    silently collapsed into one (TA-28).
+    `checkpoints` stays a tuple and is never keyed by checkpoint_id here.
+    Duplicate ids do occur, and have to be reported rather than collapsed into
+    one.
     """
 
-    run_id: str                                     # names the output files (4.1)
+    run_id: str                                     # names the output files
     facility_id: str
     facility_name: str
     run_status: str                                 # RUNNING, COMPLETED, ABORTED
@@ -355,7 +334,7 @@ class Record:
     locked: bool | None = None
     current_checkpoint_id: str | None = None        # non-null only mid-run
 
-    # Declared counts (2.1). Claims about the arrays below, not facts.
+    # Declared counts: claims about the arrays below, not facts.
     total_required_checkpoints: int | None = None
     total_completed_checkpoints: int | None = None
     passed_checkpoints: int | None = None
@@ -372,7 +351,7 @@ class Record:
     event_log: tuple[Event, ...] = ()
     live_detections: tuple[Finding, ...] = ()
 
-    # Added by the engine, not from section 2. See FieldAnomaly.
+    # Added by the engine, not read from the file. See FieldAnomaly.
     anomalies: tuple[FieldAnomaly, ...] = ()
     source_path: Path | None = None
 
@@ -380,7 +359,7 @@ class Record:
 # ---------------------------------------------------------------------------
 # The engine's own type
 #
-# Everything above mirrors section 2. This does not.
+# Everything above mirrors the record. This does not.
 # ---------------------------------------------------------------------------
 
 
@@ -389,18 +368,17 @@ class FieldAnomaly:
     """A field that was there but could not be used as recorded.
 
     A confidence written as the string "0.94" is refused rather than converted,
-    because a converted one would appear in the report as a measurement (TA-27).
-    Refusing it silently would be worse, so the refusal travels here.
+    since a converted one would appear in the report as a measurement. Refusing
+    it silently would be worse, so the refusal travels here.
 
-    Not a Gap: the ten gap types in 4.3 are a closed set and none of them means
-    "wrong type". These are carried on Record.anomalies and rendered, but never
-    appear in the manifest's gaps array.
+    Not a Gap. The ten gap types are a closed set and none of them means "wrong
+    type", so these ride on Record.anomalies and are rendered, but never appear
+    in the manifest's gaps array.
 
     `problem` quotes the value as recorded, so the text of an unparseable
     timestamp or a refused number survives into the report.
 
-    `item_id` is a checkpoint_id, or "__run__" for a run-level field, matching
-    the convention 4.4 sets for gaps.
+    `item_id` is a checkpoint_id, or "__run__" for a run-level field.
     """
 
     item_id: str

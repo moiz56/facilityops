@@ -26,12 +26,14 @@ from common import DATA_DIR, OUTPUT_DIR, PROJECT_ROOT, configure_logging, ensure
 from common.loader import RecordParseError, load_record
 from common.paths import ResolvedImage, resolve_record_images
 from common.schema import Record
+from report.gaps import RUN_LEVEL, Gap, detect_gaps
 from report.images import DirectionCell, build_direction_grid
+from report.manifest import build_manifest, write_manifest
 
 # Named explicitly: run as "python -m report.cli", __name__ would be "__main__".
 logger = logging.getLogger("report.cli")
 
-__all__ = ["Artifacts", "run_pipeline", "log_summary", "main"]
+__all__ = ["Artifacts", "run_pipeline", "log_summary", "dump_record", "dump_artifacts", "main"]
 
 
 @dataclass(frozen=True)
@@ -41,9 +43,11 @@ class Artifacts:
     record: Record
     images: dict[str, list[ResolvedImage]]
     grids: dict[str, list[DirectionCell]]
+    gaps: list[Gap]
+    manifest: dict
 
 
-def run_pipeline(record_path: Path, evidence_root: Path) -> Artifacts:
+def run_pipeline(record_path: Path, evidence_root: Path, output_dir: Path) -> Artifacts:
     """Run the pipeline stages in order and return what they produced.
 
     Raises RecordParseError if the record cannot be read at all.
@@ -61,9 +65,16 @@ def run_pipeline(record_path: Path, evidence_root: Path) -> Artifacts:
         for checkpoint_id, found in images.items()
     }
 
-    # detect_gaps, derive, render, manifest go here as their modules are written.
+    # detect_gaps
+    gaps = detect_gaps(record, images, grids)
 
-    return Artifacts(record=record, images=images, grids=grids)
+    # render is not built yet, so the PDF is named but not produced.
+    pdf_path = output_dir / f"report_{record.run_id}.pdf"
+
+    # manifest
+    manifest = build_manifest(record, gaps, images, pdf_path)
+
+    return Artifacts(record=record, images=images, grids=grids, gaps=gaps, manifest=manifest)
 
 
 def report_anomalies(record: Record) -> None:
@@ -81,19 +92,46 @@ def report_anomalies(record: Record) -> None:
         logger.warning("  %s.%s: %s", anomaly.item_id, anomaly.field_name, anomaly.problem)
 
 
-def dump_record(record: Record, destination: Path) -> None:
-    """Write the parsed record as JSON, to a file or to stdout for '-'.
+def write_json(data: object, destination: Path) -> None:
+    """Write JSON to a file, or to stdout for '-'.
 
-    A view of what the loader made of the file, not an output of the engine.
-    Datetimes and paths are written as text.
+    Datetimes and paths have no JSON form, so they are written as text.
     """
-    text = json.dumps(asdict(record), indent=2, ensure_ascii=False, default=str)
+    text = json.dumps(data, indent=2, ensure_ascii=False, default=str)
     if str(destination) == "-":
         print(text)
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(text, encoding="utf-8")
-    logger.info("wrote the parsed record to %s", destination)
+    logger.info("wrote %s", destination)
+
+
+def dump_record(record: Record, destination: Path) -> None:
+    """Write the parsed record as JSON: what the loader made of the input file."""
+    write_json(asdict(record), destination)
+
+
+def dump_artifacts(artifacts: Artifacts, destination: Path) -> None:
+    """Write the resolved images and the grids as JSON.
+
+    Not the record: --dump-record writes that, and including it here buries the
+    images under a few hundred sensor samples.
+
+    The grids repeat the images they hold, so each cell can be read on its own.
+    """
+    write_json(
+        {
+            "images": {
+                checkpoint_id: [asdict(image) for image in found]
+                for checkpoint_id, found in artifacts.images.items()
+            },
+            "grids": {
+                checkpoint_id: [asdict(cell) for cell in grid]
+                for checkpoint_id, grid in artifacts.grids.items()
+            },
+        },
+        destination,
+    )
 
 
 def log_summary(artifacts: Artifacts) -> None:
@@ -124,9 +162,24 @@ def log_summary(artifacts: Artifacts) -> None:
         sum(1 for cell in cells if cell.rgb is None and cell.thermal is None),
     )
 
+    by_type: dict[str, int] = {}
+    for gap in artifacts.gaps:
+        by_type[gap.gap_type.name] = by_type.get(gap.gap_type.name, 0) + 1
+    logger.info(
+        "gaps: %d across %d checkpoints, %d run-level",
+        len(artifacts.gaps),
+        len({g.item_id for g in artifacts.gaps if g.item_id != RUN_LEVEL}),
+        sum(1 for g in artifacts.gaps if g.item_id == RUN_LEVEL),
+    )
+    for name, count in sorted(by_type.items(), key=lambda pair: -pair[1]):
+        logger.info("  %-20s %d", name, count)
+
     for checkpoint_id, grid in artifacts.grids.items():
         missing = [cell.direction for cell in grid if cell.rgb is None]
-        no_thermal = [cell.direction for cell in grid if cell.rgb is not None and cell.thermal is None]
+        no_thermal = [
+            cell.direction for cell in grid
+            if cell.rgb is not None and cell.thermal is None
+        ]
         logger.debug(
             "  %s: %d of 8 directions%s%s",
             checkpoint_id, 8 - len(missing),
@@ -151,8 +204,18 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"report configuration (default: {config_default})")
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR,
                         help=f"where the PDF and manifest are written (default: {OUTPUT_DIR})")
-    parser.add_argument("--dump-record", type=Path, metavar="PATH", default=None,
-                        help="write the parsed record as JSON to PATH, or to stdout for -")
+    parser.add_argument("--dump-record", type=Path, metavar="PATH", nargs="?",
+                        default=None, const=Path("-"),
+                        help="write the parsed record as JSON to PATH; "
+                             "with no PATH, or with -, write it to stdout")
+    parser.add_argument("--dump-manifest", type=Path, metavar="PATH", nargs="?",
+                        default=None, const=Path("-"),
+                        help="write the manifest as JSON to PATH; "
+                             "with no PATH, or with -, write it to stdout")
+    parser.add_argument("--dump-artifacts", type=Path, metavar="PATH", nargs="?",
+                        default=None, const=Path("-"),
+                        help="write everything the pipeline produced as JSON to PATH; "
+                             "with no PATH, or with -, write it to stdout")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="log at debug level")
     return parser
@@ -165,15 +228,22 @@ def main(argv: list[str] | None = None) -> int:
     ensure_runtime_dirs()
 
     try:
-        artifacts = run_pipeline(args.record, args.evidence_root)
+        artifacts = run_pipeline(args.record, args.evidence_root, args.output_dir)
     except (RecordParseError, OSError) as error:
         logger.error("%s", error)
         return 1
 
     log_summary(artifacts)
 
+    written = write_manifest(artifacts.manifest, args.output_dir)
+    logger.info("wrote %s", written)
+
     if args.dump_record is not None:
         dump_record(artifacts.record, args.dump_record)
+    if args.dump_artifacts is not None:
+        dump_artifacts(artifacts, args.dump_artifacts)
+    if args.dump_manifest is not None:
+        write_json(artifacts.manifest, args.dump_manifest)
     return 0
 
 

@@ -108,20 +108,22 @@ def _get(
     """
     if key not in data or _blank(data[key]):
         if required:
-            anomalies.append(FieldAnomaly(item_id=item, field_name=key, problem="required, but absent"))
+            anomalies.append(FieldAnomaly(
+            item_id=item, field_name=key, problem="required, but absent",
+        ))
         return None
 
     value = data[key]
     expected = kind if isinstance(kind, tuple) else (kind,)
+    wanted = " or ".join(t.__name__ for t in expected)
+
     if isinstance(value, bool) and bool not in expected:
-        wanted = " or ".join(t.__name__ for t in expected)
         anomalies.append(FieldAnomaly(
             item_id=item, field_name=key,
             problem=f"is the boolean {value!r}, expected {wanted}",
         ))
         return None
     if not isinstance(value, expected):
-        wanted = " or ".join(t.__name__ for t in expected)
         anomalies.append(FieldAnomaly(
             item_id=item, field_name=key,
             problem=f"is {type(value).__name__} {value!r}, expected {wanted}; left unset",
@@ -130,7 +132,8 @@ def _get(
 
     if isinstance(value, str):
         return value.strip()
-    if float in expected and not isinstance(value, bool):
+    # A bool can only reach here when bool was asked for, and float never is.
+    if float in expected:
         return float(value)
     return value
 
@@ -151,7 +154,8 @@ def _time(
     value = parse(text)
     if value is None:
         anomalies.append(FieldAnomaly(
-            item_id=item, field_name=key, problem=f"timestamp {text!r} is not in the expected format",
+            item_id=item, field_name=key,
+            problem=f"timestamp {text!r} is not in the expected format",
         ))
     return value
 
@@ -185,10 +189,10 @@ def _object(
     return build(block, item, anomalies)
 
 
-def _array(
+def _entries(
     data: Mapping[str, Any], key: str, item: str, anomalies: Anomalies
-) -> tuple[Mapping[str, Any], ...]:
-    """Read an array of objects, skipping and recording any entry that is not one."""
+) -> tuple[Any, ...]:
+    """Read data[key] as an array, or () with an anomaly if it is not one."""
     value = data.get(key)
     if _blank(value):
         return ()
@@ -198,9 +202,15 @@ def _array(
             problem=f"is {type(value).__name__}, expected an array",
         ))
         return ()
+    return tuple(value)
 
+
+def _array(
+    data: Mapping[str, Any], key: str, item: str, anomalies: Anomalies
+) -> tuple[Mapping[str, Any], ...]:
+    """Read an array of objects, skipping and recording any entry that is not one."""
     kept = []
-    for index, entry in enumerate(value):
+    for index, entry in enumerate(_entries(data, key, item, anomalies)):
         if isinstance(entry, Mapping):
             kept.append(entry)
         else:
@@ -215,18 +225,8 @@ def _paths(
     data: Mapping[str, Any], key: str, item: str, anomalies: Anomalies
 ) -> tuple[str, ...]:
     """Read an array of path strings. Entries are stripped; anything else is recorded."""
-    value = data.get(key)
-    if _blank(value):
-        return ()
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        anomalies.append(FieldAnomaly(
-            item_id=item, field_name=key,
-            problem=f"is {type(value).__name__}, expected an array",
-        ))
-        return ()
-
     kept = []
-    for index, entry in enumerate(value):
+    for index, entry in enumerate(_entries(data, key, item, anomalies)):
         if isinstance(entry, str) and entry.strip():
             kept.append(entry.strip())
         else:
@@ -326,7 +326,10 @@ def _sensor(block: Mapping[str, Any], item: str, anomalies: Anomalies) -> Sensor
         accelerometer=_object(block, "accelerometer", _accelerometer, item, anomalies),
         environment=_object(block, "environment", _environment, item, anomalies),
         particulate=_object(block, "particulate", _particulate, item, anomalies),
-        warnings=tuple(_warning(w, item, anomalies) for w in _array(block, "warnings", item, anomalies)),
+        warnings=tuple(
+            _warning(w, item, anomalies)
+            for w in _array(block, "warnings", item, anomalies)
+        ),
         raw=_object(block, "raw", _raw, item, anomalies),
     )
 
@@ -420,7 +423,9 @@ def _alert(data: Mapping[str, Any], index: int, anomalies: Anomalies) -> SensorA
     where = f"sensor_alerts[{index}]"
     code = _get(data, "code", str, where, anomalies, required=True)
     if code is None:
-        anomalies.append(FieldAnomaly(item_id=where, field_name="entry", problem="dropped: no code"))
+        anomalies.append(FieldAnomaly(
+            item_id=where, field_name="entry", problem="dropped: no code",
+        ))
         return None
 
     return SensorAlert(
@@ -462,7 +467,8 @@ def _event(data: Mapping[str, Any], index: int, anomalies: Anomalies) -> Event |
     event_type = _get(data, "event_type", str, item, anomalies, required=True)
     if event_id is None or event_type is None:
         anomalies.append(FieldAnomaly(
-            item_id=where, field_name="entry", problem="dropped: no event_id or event_type",
+            item_id=where, field_name="entry",
+            problem="dropped: no event_id or event_type",
         ))
         return None
 
@@ -551,10 +557,14 @@ def load_record(path: Path) -> Record:
         facility_name=_get(data, "facility_name", str, RUN_LEVEL, anomalies, required=True) or "",
         run_status=_get(data, "run_status", str, RUN_LEVEL, anomalies, required=True) or "",
         final_status=_get(data, "final_status", str, RUN_LEVEL, anomalies, required=True) or "",
-        start_time=_time(data, "start_time", parse_offset_timestamp, RUN_LEVEL, anomalies, required=True),
+        start_time=_time(
+            data, "start_time", parse_offset_timestamp, RUN_LEVEL, anomalies, required=True,
+        ),
         end_time=_time(data, "end_time", parse_offset_timestamp, RUN_LEVEL, anomalies),
         duration=_get(data, "duration", str, RUN_LEVEL, anomalies),
-        progress_percentage=_get(data, "progress_percentage", int, RUN_LEVEL, anomalies, required=True),
+        progress_percentage=_get(
+            data, "progress_percentage", int, RUN_LEVEL, anomalies, required=True,
+        ),
         locked=_get(data, "locked", bool, RUN_LEVEL, anomalies),
         current_checkpoint_id=_get(data, "current_checkpoint_id", str, RUN_LEVEL, anomalies),
         **{

@@ -4,8 +4,10 @@ PDF report engine for facility inspection run records. Reads a run record, rende
 it through Jinja2 templates, and writes a PDF plus a manifest.
 
 Status: in progress. `common/schema.py`, `common/loader.py`, `common/paths.py`,
-`report/images.py` and the `report.cli` entry point are implemented; the
-remaining modules are docstring stubs.
+`report/images.py` and the `report.cli` entry point are implemented.
+`report/gaps.py` detects all ten gap types, one function each.
+`report/derive.py` has the reconciliation counts; its zone telemetry rollups
+and alert counts are still to come. The remaining modules are docstring stubs.
 
 ## Layout
 
@@ -122,8 +124,11 @@ python -m report.cli --record data/20260728_144120-sis_facility_checkpoint_route
 # write the parsed record as JSON, to see what the loader made of the file
 python -m report.cli --record data/20260728_144120-sis_facility_checkpoint_route/records/run.json --dump-record output/parsed.json
 
+# the resolved images and the eight-cell grids
+python -m report.cli --record data/20260728_144120-sis_facility_checkpoint_route/records/run.json --dump-artifacts output/artifacts.json
+
 # the same, to stdout: logs go to stderr, so this pipes cleanly
-python -m report.cli --record data/20260728_144120-sis_facility_checkpoint_route/records/run.json --dump-record - | jq .anomalies
+python -m report.cli --record data/20260728_144120-sis_facility_checkpoint_route/records/run.json --dump-record | jq .anomalies
 
 # a run whose evidence lives somewhere else
 python -m report.cli \
@@ -149,7 +154,8 @@ PYTHONPATH=/path/to/facilityops-report/src python -m report.cli \
 | `--evidence-root PATH` | `data/` | root that recorded evidence paths are rewritten against |
 | `--config PATH` | `config/report.yaml` | report configuration |
 | `--output-dir PATH` | `output/` | where the PDF and manifest are written |
-| `--dump-record PATH` | | write the parsed record as JSON to PATH, or to stdout for `-` |
+| `--dump-record [PATH]` | | write the parsed record as JSON to PATH; with no PATH, to stdout |
+| `--dump-artifacts [PATH]` | | write the resolved `images` and the `grids` as JSON |
 | `-v`, `--verbose` | | log at debug level |
 
 ### Exit status
