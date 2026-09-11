@@ -3,8 +3,9 @@
 PDF report engine for facility inspection run records. Reads a run record, renders
 it through Jinja2 templates, and writes a PDF plus a manifest.
 
-Status: in progress. `common/schema.py`, `common/loader.py` and the `report.cli`
-entry point are implemented; the remaining modules are docstring stubs.
+Status: in progress. `common/schema.py`, `common/loader.py`, `common/paths.py`,
+`report/images.py` and the `report.cli` entry point are implemented; the
+remaining modules are docstring stubs.
 
 ## Layout
 
@@ -69,14 +70,15 @@ in section 2.3 of the brief resolves with `path_prefix: /run-files` unchanged:
 
 ```
 data/
-  records/run.json
   20260728_144120-sis_facility_checkpoint_route/
+    records/run.json
     evidence/SIS Facility Checkpoint Route/checkpoint_1/checkpoint_1_N.jpg
 ```
 
-Records and evidence are separate inputs - the engine takes a record path and an
-evidence root as two arguments - so records collect in one folder while each run's
-evidence keeps the shape its recorded paths imply. The evidence root is `data/`.
+Each run keeps its own record and evidence together, in the shape its recorded
+paths imply. The record path and the evidence root are two separate arguments;
+the evidence root is `data/`, and the run id in the recorded path selects the
+run beneath it.
 
 ## Running
 
@@ -86,10 +88,22 @@ The pipeline runs as the seven stages section 5.2 of the brief fixes:
 load -> validate -> resolve_images -> detect_gaps -> derive -> render -> manifest
 ```
 
-Built so far: `load` and `validate`, so a run  parses the record and reports
-what it disagrees with section 2 about. Later stages join as their modules are
-written, and `--list-stages` and `--stop-after` read from that list, so both stay
-accurate.
+Built so far: `load`, `validate` and `resolve_images`. They are plain calls in
+`run_pipeline()`, in order; each later stage is one more call as its module is
+written.
+
+```python
+from pathlib import Path
+from report.cli import run_pipeline
+
+artifacts = run_pipeline(Path("data/<run_id>/records/run.json"), Path("data"))
+artifacts.record                      # the parsed Record
+artifacts.images["checkpoint_1"]      # that checkpoint's ResolvedImages
+artifacts.grids["checkpoint_1"]       # its eight DirectionCells, in compass order
+```
+
+`run_pipeline` returns an `Artifacts` object; later stages add their outputs to
+it rather than changing the call.
 
 ### Commands
 
@@ -100,26 +114,20 @@ location, so they point at the project wherever you stand.
 
 ```
 # parse a record and report what it disagrees with section 2 about
-python -m report.cli --record data/records/run.json
+python -m report.cli --record data/20260728_144120-sis_facility_checkpoint_route/records/run.json
 
-# which stages are built, in order
-python -m report.cli --list-stages
-
-# run only as far as one stage
-python -m report.cli --record data/records/run.json --stop-after load
-
-# every anomaly, undescribed key and parse decision
-python -m report.cli --record data/records/run.json -v
+# every anomaly and parse decision
+python -m report.cli --record data/20260728_144120-sis_facility_checkpoint_route/records/run.json -v
 
 # write the parsed record as JSON, to see what the loader made of the file
-python -m report.cli --record data/records/run.json --dump-record output/parsed.json
+python -m report.cli --record data/20260728_144120-sis_facility_checkpoint_route/records/run.json --dump-record output/parsed.json
 
 # the same, to stdout: logs go to stderr, so this pipes cleanly
-python -m report.cli --record data/records/run.json --dump-record - | jq .anomalies
+python -m report.cli --record data/20260728_144120-sis_facility_checkpoint_route/records/run.json --dump-record - | jq .anomalies
 
 # a run whose evidence lives somewhere else
 python -m report.cli \
-    --record "data/records/run.json" \
+    --record "data/20260728_144120-sis_facility_checkpoint_route/records/run.json" \
     --evidence-root "/mnt/handover/SIS Facility Route" \
     --output-dir out/
 ```
@@ -127,10 +135,10 @@ python -m report.cli \
 Not installed, or running from elsewhere:
 
 ```
-PYTHONPATH=src python -m report.cli --record data/records/run.json
+PYTHONPATH=src python -m report.cli --record data/20260728_144120-sis_facility_checkpoint_route/records/run.json
 
 PYTHONPATH=/path/to/facilityops-report/src python -m report.cli \
-    --record /path/to/facilityops-report/data/records/run.json
+    --record /path/to/facilityops-report/data/20260728_144120-sis_facility_checkpoint_route/records/run.json
 ```
 
 ### Options
@@ -141,16 +149,14 @@ PYTHONPATH=/path/to/facilityops-report/src python -m report.cli \
 | `--evidence-root PATH` | `data/` | root that recorded evidence paths are rewritten against |
 | `--config PATH` | `config/report.yaml` | report configuration |
 | `--output-dir PATH` | `output/` | where the PDF and manifest are written |
-| `--stop-after STAGE` | run every built stage | stop once that stage completes |
 | `--dump-record PATH` | | write the parsed record as JSON to PATH, or to stdout for `-` |
-| `--list-stages` | | print the built stages and exit |
 | `-v`, `--verbose` | | log at debug level |
 
 ### Exit status
 
 | Code | Meaning |
 | --- | --- |
-| 0 | the requested stages completed |
+| 0 | finished |
 | 1 | the run failed for a reported reason, such as an unreadable record |
 | 2 | the command line was wrong |
 
@@ -167,6 +173,30 @@ Recorded paths are stripped of surrounding whitespace only, so spaces inside a
 name survive: all 87 references in the reference run contain spaces, and all 87
 resolve.
 
+## Configuration
+
+`config/report.yaml` holds the report settings. `common/paths.py` reads three of
+them at import - the compass directions, the thermal filename suffix, and the
+path prefix stripped from recorded evidence paths:
+
+```
+paths:
+  path_prefix: /run-files
+evidence:
+  directions: [N, NE, E, SE, S, SW, W, NW]
+  thermal_suffix: _thermal
+```
+
+Change `directions` or `thermal_suffix` there and the filename parsing follows.
+
+### Not read yet
+
+The `report`, `sensor`, `sections` and `branding` sections are in the file but
+nothing consumes them yet; they are wired in as the modules that need them are
+written. Config validation - a clear error for a missing key, a warning for an
+unknown one - is not implemented, and neither is the `config_hash` the manifest
+needs.
+
 ## Tests
 
 ```
@@ -174,22 +204,38 @@ pytest
 ```
 
 Collection is limited to `tests/` via `[tool.pytest.ini_options]` in
-`pyproject.toml`.
+`pyproject.toml`. Everything lives in `tests/test_report.py`, and test names
+carry the section 7 test id where a test covers one, so the results table in
+deliverable 10 can be read off the pytest output.
 
-`tests/test_report.py` is currently empty.
+### Fixtures
 
-`tests/data/` holds the supplied runs, one directory each, all in the same shape:
+Evidence trees are built inside pytest's `tmp_path` at test time; there are no
+committed binary fixtures. A zero-byte file, a text file wearing a `.jpg`
+extension, a directory whose name carries spaces and mixed case, and a real
+JPEG written by Pillow are a few lines each, so the suite runs on a clean
+machine with nothing to fetch, and every failure case is legible in the test
+source instead of hidden in a file nobody can open.
+
+Two tests read the supplied reference run at
+`data/20260728_144120-sis_facility_checkpoint_route/records/run.json` and check
+that all 87 recorded evidence paths resolve and that thermal coverage matches
+section 2.3. `data/` is git-ignored local run data, so both skip when it is
+absent rather than failing.
+
+### Supplied runs
+
+Each supplied run keeps the layout its own recorded paths imply:
 
 ```
-tests/data/<run_id>/
+data/<run_id>/
   records/run.json
   evidence/SIS Facility Checkpoint Route/<checkpoint_id>/<checkpoint_id>_<DIR>.jpg
 ```
 
-They were supplied with inconsistent layouts - `Evidence/` against `evidence/`,
+They arrived with inconsistent layouts - `Evidence/` against `evidence/`,
 `Record/` against `Records/`, one record at the top level, one evidence tree
 nested a second time under its run id - and were normalised to the above. The
 lowercase form is what the records themselves reference, so the rewrite rule of
-section 2.3 resolves against `tests/data/` as the evidence root with
+section 2.3 resolves against `data/` as the evidence root with
 `path_prefix: /run-files` unchanged.
-
