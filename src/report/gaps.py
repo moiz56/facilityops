@@ -20,7 +20,7 @@ from pathlib import PurePosixPath
 
 from common.paths import CONFIG_PATH, ResolvedImage, load_config, setting
 from common.schema import Checkpoint, Finding, Record, SensorBlock
-from report.derive import computed_counts, declared_counts
+from report.derive import SUBSYSTEM_FLAGS, computed_counts, declared_counts
 from report.images import DirectionCell, build_direction_grid
 
 __all__ = [
@@ -124,8 +124,9 @@ _config = load_config(CONFIG_PATH)
 #: Above this many seconds a reading still renders, but flagged stale.
 MAX_AGE_SECONDS: float = setting(_config, "sensor", "max_age_seconds")
 
-#: raw device flag -> the block of the reading it governs.
-SUBSYSTEM_FLAGS: dict[str, str] = setting(_config, "sensor", "subsystem_flags")
+# SUBSYSTEM_FLAGS is defined in derive.py and re-exported here. One definition
+# of which flag governs which block keeps this module's gap and derive's
+# suppressed zone statistic from ever disagreeing about the same device.
 
 
 def unavailable_reason(sensor: SensorBlock | None) -> str | None:
