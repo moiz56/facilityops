@@ -1,0 +1,56 @@
+{# Cover page - 3.1.
+
+   Facility name and ID, run ID, start and end time, duration, the final status
+   badge, and the headline counts.
+
+   A count the record declared differently is printed with that claim beside it
+   and marked. 2.9 forbids silently preferring one figure over the other, and
+   the coverage page reconciles them in full (3.3). #}
+<section class="section cover">
+
+  {% if logo_uri %}
+    <img class="cover-logo" src="{{ logo_uri }}" alt="">
+  {% endif %}
+
+  <h1>{{ record.facility_name }}</h1>
+  <p class="cover-facility-id">{{ record.facility_id }}</p>
+
+  <p class="cover-verdict">
+    <span class="badge badge-{{ verdict_style }}">{{ record.final_status }}</span>
+  </p>
+
+  <table class="cover-run-table detail-table">
+    <tr><th>Run ID</th><td>{{ record.run_id }}</td></tr>
+    <tr><th>Started</th><td>{{ record.start_time | moment }}</td></tr>
+    <tr><th>Ended</th><td>{{ record.end_time | moment("Not recorded - the run did not finish") }}</td></tr>
+    <tr><th>Duration</th><td>{{ record.duration | show }}</td></tr>
+    <tr><th>Run status</th><td>{{ record.run_status }}</td></tr>
+  </table>
+
+  <h2>Headline counts</h2>
+  <table class="cover-counts">
+    {% for count in headline %}
+      <tr{% if count.disagrees %} class="count-disagrees"{% endif %}>
+        <th>{{ count.label }}</th>
+        <td>
+          <span class="count-figure">{{ count.computed }}</span>
+          {% if count.disagrees %}
+            <span class="count-declared">(the record declares {{ count.declared }})</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
+
+  {% if counts_disagree %}
+    <p class="absent">
+      The record's own counts disagree with the checkpoints it contains.
+      Both figures are printed above and reconciled on the coverage page.
+    </p>
+  {% endif %}
+
+  {% if not record.checkpoints %}
+    <p class="absent">No checkpoints were recorded for this run.</p>
+  {% endif %}
+
+</section>

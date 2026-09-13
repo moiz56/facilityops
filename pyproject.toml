@@ -11,6 +11,10 @@ requires-python = ">=3.11"
 dependencies = [
     "jinja2==3.1.4",
     "weasyprint==62.3",
+    # Pinned explicitly although weasyprint pulls it in: weasyprint 62.3 calls a
+    # pydyf API that pydyf 0.11 changed, so an unpinned install breaks at
+    # write_pdf. Deliverable 2 requires exact versions, transitive ones included.
+    "pydyf==0.10.0",
     "pyyaml==6.0.2",
     "pillow==10.4.0",
 ]

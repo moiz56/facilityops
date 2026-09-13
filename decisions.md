@@ -78,6 +78,44 @@
 
 39. Nothing in derive.py formats. A mean is left unrounded and no figure is turned into text, so how a number is rounded and how an empty cell is worded stay in one place, the templates.
 
+40. report/render.py owns the `report`, `sections` and `branding` config sections, which decision 18 left without one. `evidence` and `sensor` keep their existing owners in common/paths.py and report/derive.py. Only `config_hash` (4.4) and 5.7's warning for an unknown key are still unimplemented.
+
+41. `render_pdf` takes `output_dir` as a trailing argument with a default, the same pattern as decisions 11 and 31. 5.3 pins the signature at five arguments and none of them says where the file goes, while 4.1 puts both outputs in output/; a default keeps 5.3's call shape working and lets the pipeline pass the directory it was actually given.
+
+42. The cover prints the computed count, with the record's own claim beside it in red wherever the two differ, and a sentence pointing at the coverage page. 3.1 asks for "the headline counts" without saying which of the two 3.3 reconciles, and 2.9 forbids silently preferring one. The computed figure is the one printed large because it is what the rest of the report is built from.
+
+43. The cover carries a Run status row, which 3.1's list does not name. Without it `run_status` appears nowhere in the report at all, and a cover reading PENDING with no end time would not say whether the run was still going or had been abandoned - which is the confident wrong answer 0 rules out rather than the honest gap. Raised as question 13.
+
+44. A `final_status` that is not PASS, FAIL or WARN renders as written in a neutral badge, never mapped onto a known verdict (11). Run 20260729_135422 declares PENDING, which 2.1 does not list, and it renders as PENDING.
+
+45. The page footer carries `branding.footer_text` and the four provenance facts of 5.6 in one line, with the page number opposite. 5.7 names the key for the footer and 5.6 requires the four facts there, so both belong in the same place rather than competing for one corner of the page.
+
+46. `report.page_size`, `branding.primary_colour` and the footer line are applied as a small stylesheet built by render.py, since styles.css is a static file and those three cannot be. Everything else, page-break control included, stays in styles.css as 5.5 requires.
+
+47. Jinja renders with `StrictUndefined` and autoescaping. A mistyped field in a template raises instead of rendering an empty cell, which is the same reason the engine refuses a wrong type rather than coercing it (decision 4); autoescaping is what 5.5 asks for, and TA-29 is verified against the rendered HTML rather than assumed.
+
+48. `pydyf==0.10.0` is pinned in pyproject.toml even though weasyprint pulls it in. weasyprint 62.3 calls a pydyf API that 0.11 changed, so an unpinned install raises AttributeError inside `write_pdf` - a clean-machine failure of TA-08 with no obvious cause. Deliverable 2 requires exact versions, and a transitive dependency that breaks the build is exactly what that is for.
+
+49. A branding logo that is not at the configured path is logged and left out, and the report renders without it. 5.7's rule about a missing key is about the key, not the file it points at. The supplied config/assets/logo.png is a 1x1 pixel placeholder, so nothing visible renders today; see question 12.
+
+50. Each top-level section starts on a new page, so 4.4's section page ranges describe whole pages rather than positions part-way down one. 3.2's rule that a long checkpoint block may break mid-section is unaffected: that break is within the checkpoints section, not between sections.
+
+51. `provenance.engine_version` and `provenance.template_version` are config values in config/report.yaml, not constants in common/provenance.py. 5.7 does not list a provenance section, so this adds a key the brief does not name: a release then changes one line of config rather than a line of code, and the footer, the manifest and the config hash all follow it together. `stamp(run_id, config)` reads the config that was actually applied, so a report cannot carry one engine version in its footer and a different one in its manifest. Raised as question 15, because 4.4 hashes the resolved config and an engine bump therefore moves `config_hash` too.
+
+52. common/provenance.py is the only place the four facts of 5.6 are assembled. report/manifest.py takes `generated_at`, `source_run_id`, `engine_version` and `template_version` from one `stamp()` call instead of building its own timestamp, and render.py stamps once per render rather than once for the page context and again for the footer, which could have put two different times on one report.
+
+53. report/cli.py passes its `--config` path to `build_manifest`. It did not, so a run with a custom config rendered a PDF from that file while the manifest reported the default file's versions and hashed the default file - which 4.4 forbids, since `config_hash` is defined as the config "as actually applied". Found by rendering with a probe config and reading both outputs.
+
+54. `setting()` names the missing key but no longer names a file. It is given a config that has already been read and cannot know which file it came from, so naming the default one pointed at the wrong file whenever `--config` was used. 5.7 requires the error to name the key; `load_config` still names the file, which is where the file is what is wrong.
+
+55. A ConfigError exits 1 with the message on stderr, like an unreadable record, instead of a stack trace. TA-26 asks for that for a malformed record and 5.7 asks for "a clear error" for a missing key; a traceback is neither. No output file is written.
+
+56. `manifest.version` is a config value too, so every version the manifest reports - its own, the engine's and the template's - comes from config/report.yaml rather than from three different places. 4.2 fixes the value at "1.0"; config is where it is now written.
+
+57. `build_manifest` reads the config once. It was reading it twice, once for the version stamp and once inside `config_hash`, which meant the hash and the stamp were not guaranteed to describe the same file. `hash_config(config)` hashes a config already in hand and `config_hash(path)` reads one first, so the tests that hash two files by path still work unchanged.
+
+58. One `stamp()` per run, made in `run_pipeline` and passed to both `render_pdf` and `build_manifest`. Each stamped separately before, so the PDF footer and the manifest could record generation times a second apart - and 5.6 asks for the same four facts in both. Both keep a trailing optional `provenance` argument defaulting to None, so 5.3's call shape and a caller that only wants a manifest still work.
+
 # Questions to raise
 
 1. branding.yaml is a standalone file but the config.yaml in the document contains a branding section, for now I have put both in the config.yaml making branding.yaml empty but is this the way to go
@@ -99,3 +137,11 @@
 10. for now an unusable reading reports only SENSOR_UNAVAILABLE, so a checkpoint whose hub was unreachable and whose sps30 was also dead gives one gap and not two, since the PDF shows one "Sensor unavailable" line and 4.4 wants both directions to match. is that wanted, or should the PDF list the dead sub-devices underneath and the manifest carry a gap for each
 
 11. 3.4 gives one row per zone, but 2.2 does not say a zone holds only one checkpoint. where two checkpoints in a zone disagree about a device flag, for now the whole zone's block is suppressed and the cell names the flag that said so. is that wanted, or should the zone still report the samples taken while the working checkpoint's device was up - which would need an attribution from sample to checkpoint that 2.5 and 2.6 do not provide
+
+12. config/assets/logo.png as supplied is a 1x1 pixel image, so the cover renders no visible logo. 9 lists the logo file as provided on day one - is the real one still to come, and what proportions should the cover reserve for it
+
+13. 3.1 lists six things for the cover and run_status is not among them, but it appears nowhere else in the report either, so a RUNNING or ABORTED run would read as an ordinary one. for now the cover carries a Run status row. is that wanted, or should run_status render somewhere else, or nowhere
+
+14. pyproject.toml declares version 1.0.0 while the engine version stamped into every footer and manifest is 0.1.0. both are mine and neither is wrong yet, but they should be one number before delivery - which should the manifest's engine_version follow
+
+15. engine_version now lives in config/report.yaml, and 4.4 defines config_hash as a SHA-256 of the resolved config as applied - so bumping the engine version changes config_hash, although 4.2 reports engine_version as its own manifest field. is that wanted, or should the version stamp be excluded from the hashed config so config_hash means "the configuration changed" and nothing else

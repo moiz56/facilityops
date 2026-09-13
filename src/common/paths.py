@@ -36,10 +36,16 @@ def load_config(path: Path) -> dict:
 
 
 def setting(config: dict, section: str, key: str):
-    """Return one required setting, or raise ConfigError naming the one that is missing."""
+    """Return one required setting, or raise ConfigError naming the one that is missing.
+
+    The message names the key, which is what 5.7 asks for, and not a file. This
+    takes a config that has already been read and cannot know which file it came
+    from; naming the default one would point at the wrong file whenever a caller
+    passed --config. load_config names the file, where the file is what is wrong.
+    """
     block = config.get(section)
     if not isinstance(block, dict) or key not in block:
-        raise ConfigError(f"{CONFIG_PATH}: missing required setting '{section}.{key}'")
+        raise ConfigError(f"missing required setting '{section}.{key}'")
     return block[key]
 
 

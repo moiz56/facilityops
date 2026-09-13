@@ -13,37 +13,46 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict
-from datetime import datetime, timezone
 from pathlib import Path
 
-from common.paths import CONFIG_PATH, ResolvedImage, load_config
+from common.paths import CONFIG_PATH, ResolvedImage, load_config, setting
+from common.provenance import Provenance, stamp
 from common.schema import Record
 from report.derive import alert_counts, computed_counts, declared_counts
 from report.gaps import RUN_LEVEL, Gap
 
 __all__ = [
-    "MANIFEST_VERSION", "ENGINE_VERSION", "TEMPLATE_VERSION", "PLACEHOLDER_FIELDS",
-    "config_hash", "build_manifest", "write_manifest",
+    "PLACEHOLDER_FIELDS",
+    "hash_config", "config_hash", "build_manifest", "write_manifest",
 ]
 
-MANIFEST_VERSION = "1.0"
-TEMPLATE_VERSION = "full_report_v1"
-
-#: Moves to common/provenance.py, which is the named home for version stamping.
-ENGINE_VERSION = "0.1.0"
+# Every version in the manifest is a config value. `manifest.version` is the
+# shape of this file; the engine and template versions, the generation time and
+# the run id come from one common.provenance.stamp() call, which 5.6 names as
+# their home, so the manifest and the page footer cannot disagree about any of
+# the four.
 
 #: Fields that cannot be real until render.py exists.
 PLACEHOLDER_FIELDS = ("page_count", "sections")
 
 
-def config_hash(config_path: Path = CONFIG_PATH) -> str:
-    """SHA-256 of the config as actually applied, prefixed sha256:.
+def hash_config(config: dict) -> str:
+    """SHA-256 of a config as actually applied, prefixed sha256: (4.4).
 
     Hashes the parsed values rather than the file bytes, so reordering keys or
     editing a comment does not change the hash, and changing a value does.
     """
-    applied = json.dumps(load_config(config_path), sort_keys=True, default=str)
+    applied = json.dumps(config, sort_keys=True, default=str)
     return f"sha256:{hashlib.sha256(applied.encode('utf-8')).hexdigest()}"
+
+
+def config_hash(config_path: Path = CONFIG_PATH) -> str:
+    """The hash of one config file. Reads it, then hands it to hash_config.
+
+    Kept separate so a caller that has already read the config does not read it
+    a second time only to hash it.
+    """
+    return hash_config(load_config(config_path))
 
 
 def build_manifest(
@@ -52,22 +61,33 @@ def build_manifest(
     images: dict[str, list[ResolvedImage]],
     pdf_path: Path,
     config_path: Path = CONFIG_PATH,
+    provenance: Provenance | None = None,
 ) -> dict:
     """Build the manifest for one run.
+
+    `provenance` is the stamp the report was rendered with. Passing it is how
+    the manifest and the page footer come to carry the same generation time;
+    without one the manifest stamps itself, which keeps the call shape simple
+    for a caller that only wants the manifest.
 
     `page_count` and `sections` are placeholders until the PDF is rendered.
     Everything else is real.
     """
     found = [image for images_of in images.values() for image in images_of]
 
+    # Read once. The version stamp and the hash must describe the same config,
+    # and 4.4 defines the hash as the config as actually applied.
+    config = load_config(config_path)
+    provenance = provenance or stamp(record.run_id, config)
+
     return {
-        "manifest_version": MANIFEST_VERSION,
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "source_run_id": record.run_id,
+        "manifest_version": setting(config, "manifest", "version"),
+        "generated_at": provenance.generated_at,
+        "source_run_id": provenance.source_run_id,
         "facility_id": record.facility_id,
-        "engine_version": ENGINE_VERSION,
-        "template_version": TEMPLATE_VERSION,
-        "config_hash": config_hash(config_path),
+        "engine_version": provenance.engine_version,
+        "template_version": provenance.template_version,
+        "config_hash": hash_config(config),
         "report_file": pdf_path.name,
 
         # Placeholders. Both describe the rendered PDF, which does not exist yet.

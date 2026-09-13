@@ -1,0 +1,22 @@
+{# The report shell.
+
+   3.1 fixes the order of the sections: cover, coverage, findings, alerts,
+   checkpoint sections, summary table, provenance footer. Each is included only
+   when config turns it on (5.7), and the manifest omits the entry for any
+   section that was left out (4.4).
+
+   Sections are added here as they are built. #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Inspection report {{ record.run_id }}</title>
+</head>
+<body>
+
+{% if sections.cover %}
+  {% include "_cover.html.j2" %}
+{% endif %}
+
+</body>
+</html>

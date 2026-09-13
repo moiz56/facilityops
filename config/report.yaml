@@ -10,6 +10,13 @@ report:
   page_size: A4
   max_image_dimension: 1200        # TUNABLE - longest edge in px before embedding
 
+provenance:                        # stamped into every page footer and the manifest (5.6)
+  engine_version: "0.1.0"
+  template_version: full_report_v1
+
+manifest:
+  version: "1.0"                   # 4.2's manifest_version - the shape of the manifest itself
+
 paths:
   path_prefix: /run-files          # stripped from evidence_images before joining evidence_root
 

@@ -1,0 +1,152 @@
+/* Report stylesheet.
+ *
+ * Page-break control lives here and nowhere else (5.5). The page size and the
+ * brand colour are injected by render.py from config/report.yaml, so they are
+ * the only two values this file does not set for itself.
+ *
+ * Read by an auditor on paper: plain, factual, no decoration that carries
+ * meaning a sentence should carry instead.
+ */
+
+/* --- the page ---------------------------------------------------------- */
+
+@page {
+  /* size comes from report.page_size */
+  margin: 18mm 16mm 20mm 16mm;
+
+  /* content comes from render.py: branding.footer_text and the four
+   * provenance facts 5.6 requires on every page. */
+  @bottom-left {
+    font-family: "DejaVu Sans", sans-serif;
+    font-size: 6.5pt;
+    color: #555;
+  }
+
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: "DejaVu Sans", sans-serif;
+    font-size: 6.5pt;
+    color: #555;
+    white-space: nowrap;
+  }
+}
+
+/* --- type -------------------------------------------------------------- */
+
+body {
+  font-family: "DejaVu Sans", sans-serif;
+  font-size: 9.5pt;
+  line-height: 1.45;
+  color: #1a1a1a;
+  margin: 0;
+}
+
+h1, h2, h3 {
+  color: var(--primary-colour);
+  margin: 0 0 0.4em;
+}
+
+h1 { font-size: 22pt; }
+h2 { font-size: 14pt; }
+h3 { font-size: 11pt; }
+
+/* --- page breaks (5.5) -------------------------------------------------- */
+
+.checkpoint-block { break-inside: avoid; }
+.detail-table     { break-inside: avoid; }
+.evidence-grid    { break-inside: avoid; }
+.zone-head        { break-after: avoid; }
+img               { break-inside: avoid; }
+
+/* Each top-level section starts its own page, so the manifest's section page
+ * ranges (4.4) describe whole pages rather than places mid-page. */
+.section { break-before: page; }
+.section:first-of-type { break-before: auto; }
+
+/* --- tables ------------------------------------------------------------- */
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th, td {
+  text-align: left;
+  padding: 3pt 6pt;
+  border-bottom: 0.5pt solid #d5d5d5;
+  vertical-align: top;
+}
+
+th {
+  font-weight: bold;
+  color: #333;
+}
+
+/* Long identifiers break rather than overflow their cell (2.4). */
+td, th { overflow-wrap: anywhere; }
+
+/* --- status badges ------------------------------------------------------ */
+
+.badge {
+  display: inline-block;
+  padding: 3pt 10pt;
+  border: 1pt solid currentColor;
+  border-radius: 2pt;
+  font-weight: bold;
+  letter-spacing: 0.06em;
+}
+
+.badge-pass { color: #1a6b34; }
+.badge-fail { color: #9b1c1c; }
+.badge-warn { color: #8a5a00; }
+
+/* Any verdict the record carries that 2.2 does not list still renders, in the
+ * neutral style, because 11 forbids mapping it onto a known one. */
+.badge-other { color: #333; }
+
+/* --- the cover ---------------------------------------------------------- */
+
+.cover-logo {
+  max-height: 18mm;
+  margin-bottom: 14mm;
+}
+
+.cover-facility-id {
+  font-size: 10pt;
+  color: #555;
+  margin: 0 0 10mm;
+}
+
+.cover-verdict {
+  margin: 0 0 12mm;
+  font-size: 13pt;
+}
+
+.cover-run-table { margin-bottom: 12mm; }
+.cover-run-table th { width: 32%; }
+
+.cover-counts th { width: 60%; }
+.cover-counts td { text-align: right; }
+
+.cover-counts .count-figure {
+  font-weight: bold;
+  font-size: 11pt;
+}
+
+/* A figure the record's own claim disagrees with. 2.9 forbids printing one
+ * without the other, so the declared value sits beside it, marked. */
+.count-disagrees .count-figure { color: #9b1c1c; }
+
+.count-declared {
+  color: #9b1c1c;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+/* --- statements about what is not there --------------------------------- */
+
+/* 0 and 3.6: a gap is said in words, in the place the missing thing would be. */
+.absent {
+  color: #9b1c1c;
+  font-weight: bold;
+}

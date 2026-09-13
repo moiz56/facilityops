@@ -4,12 +4,14 @@ The full pipeline is seven stages, in this order:
 
     load -> validate -> resolve_images -> detect_gaps -> derive -> render -> manifest
 
-Built so far: load and validate. Each new stage is one more call in main(), in
-that order, so the pipeline reads top to bottom.
+All seven run. The report itself is built a section at a time: render produces
+whatever templates exist, and each new one is an include in full_report.html.j2
+rather than a change here.
 
 Exit status:
     0  finished
-    1  the run failed for a reported reason, such as an unreadable record
+    1  the run failed for a reported reason - an unreadable record, or a config
+       that is missing a setting the engine needs
     2  the command line was wrong (argparse)
 """
 
@@ -24,11 +26,16 @@ from pathlib import Path
 
 from common import DATA_DIR, OUTPUT_DIR, PROJECT_ROOT, configure_logging, ensure_runtime_dirs
 from common.loader import RecordParseError, load_record
-from common.paths import ResolvedImage, resolve_record_images
+from common.paths import (
+    CONFIG_PATH, ConfigError, ResolvedImage, load_config, resolve_record_images,
+)
+from common.provenance import stamp
 from common.schema import Record
+from report.derive import DerivedValues, derive_report_values
 from report.gaps import RUN_LEVEL, Gap, detect_gaps
 from report.images import DirectionCell, build_direction_grid
 from report.manifest import build_manifest, write_manifest
+from report.render import render_pdf
 
 # Named explicitly: run as "python -m report.cli", __name__ would be "__main__".
 logger = logging.getLogger("report.cli")
@@ -44,10 +51,17 @@ class Artifacts:
     images: dict[str, list[ResolvedImage]]
     grids: dict[str, list[DirectionCell]]
     gaps: list[Gap]
+    derived: DerivedValues
+    pdf_path: Path
     manifest: dict
 
 
-def run_pipeline(record_path: Path, evidence_root: Path, output_dir: Path) -> Artifacts:
+def run_pipeline(
+    record_path: Path,
+    evidence_root: Path,
+    output_dir: Path,
+    config_path: Path = CONFIG_PATH,
+) -> Artifacts:
     """Run the pipeline stages in order and return what they produced.
 
     Raises RecordParseError if the record cannot be read at all.
@@ -68,13 +82,25 @@ def run_pipeline(record_path: Path, evidence_root: Path, output_dir: Path) -> Ar
     # detect_gaps
     gaps = detect_gaps(record, images, grids)
 
-    # render is not built yet, so the PDF is named but not produced.
-    pdf_path = output_dir / f"report_{record.run_id}.pdf"
+    # derive
+    derived = derive_report_values(record)
 
-    # manifest
-    manifest = build_manifest(record, gaps, images, pdf_path)
+    # One stamp for the whole run, so the page footer and the manifest agree on
+    # when the report was generated and which engine made it (5.6).
+    config = load_config(config_path)
+    provenance = stamp(record.run_id, config)
 
-    return Artifacts(record=record, images=images, grids=grids, gaps=gaps, manifest=manifest)
+    # render
+    pdf_path = render_pdf(record, gaps, derived, grids, config, output_dir, provenance)
+
+    # manifest. The same config path the render used, so the version stamp and
+    # the config hash describe the config that was actually applied (4.4).
+    manifest = build_manifest(record, gaps, images, pdf_path, config_path, provenance)
+
+    return Artifacts(
+        record=record, images=images, grids=grids, gaps=gaps,
+        derived=derived, pdf_path=pdf_path, manifest=manifest,
+    )
 
 
 def report_anomalies(record: Record) -> None:
@@ -228,8 +254,10 @@ def main(argv: list[str] | None = None) -> int:
     ensure_runtime_dirs()
 
     try:
-        artifacts = run_pipeline(args.record, args.evidence_root, args.output_dir)
-    except (RecordParseError, OSError) as error:
+        artifacts = run_pipeline(
+            args.record, args.evidence_root, args.output_dir, args.config
+        )
+    except (RecordParseError, ConfigError, OSError) as error:
         logger.error("%s", error)
         return 1
 
