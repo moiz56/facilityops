@@ -1,11 +1,12 @@
 /* Report stylesheet.
  *
- * Page-break control lives here and nowhere else (5.5). The page size and the
- * brand colour are injected by render.py from config/report.yaml, so they are
- * the only two values this file does not set for itself.
+ * Page-break control lives here and nowhere else (5.5). The page size, the
+ * brand colour and the footer text are injected by render.py from
+ * config/report.yaml, so they are the only values this file does not set.
  *
- * Read by an auditor on paper: plain, factual, no decoration that carries
- * meaning a sentence should carry instead.
+ * Read on paper by facility managers and auditors. Plain and factual: nothing
+ * here carries meaning that a sentence should carry instead, and nothing is
+ * distinguished by colour alone, because this document gets photocopied.
  */
 
 /* --- the page ---------------------------------------------------------- */
@@ -19,14 +20,14 @@
   @bottom-left {
     font-family: "DejaVu Sans", sans-serif;
     font-size: 6.5pt;
-    color: #555;
+    color: #666;
   }
 
   @bottom-right {
     content: "Page " counter(page) " of " counter(pages);
     font-family: "DejaVu Sans", sans-serif;
     font-size: 6.5pt;
-    color: #555;
+    color: #666;
     white-space: nowrap;
   }
 }
@@ -35,20 +36,44 @@
 
 body {
   font-family: "DejaVu Sans", sans-serif;
-  font-size: 9.5pt;
-  line-height: 1.45;
+  font-size: 9pt;
+  line-height: 1.5;
   color: #1a1a1a;
   margin: 0;
 }
 
 h1, h2, h3 {
   color: var(--primary-colour);
-  margin: 0 0 0.4em;
+  font-weight: bold;
 }
 
-h1 { font-size: 22pt; }
-h2 { font-size: 14pt; }
-h3 { font-size: 11pt; }
+h1 {
+  font-size: 20pt;
+  line-height: 1.2;
+  margin: 0 0 2mm;
+}
+
+/* A section heading, with a rule under it so the eye finds the boundary. */
+h2 {
+  font-size: 13pt;
+  margin: 0 0 4mm;
+  padding-bottom: 1.5mm;
+  border-bottom: 1pt solid var(--primary-colour);
+}
+
+h3 {
+  font-size: 10pt;
+  margin: 7mm 0 2mm;
+}
+
+p { margin: 0 0 3mm; }
+
+/* Intent-setting text under a heading. */
+.lede {
+  margin: 0 0 6mm;
+  color: #444;
+  max-width: 155mm;
+}
 
 /* --- page breaks (5.5) -------------------------------------------------- */
 
@@ -58,95 +83,157 @@ h3 { font-size: 11pt; }
 .zone-head        { break-after: avoid; }
 img               { break-inside: avoid; }
 
-/* Each top-level section starts its own page, so the manifest's section page
- * ranges (4.4) describe whole pages rather than places mid-page. */
+/* Each top-level section starts its own page, so 4.4's section page ranges
+ * describe whole pages rather than positions part-way down one. */
 .section { break-before: page; }
 .section:first-of-type { break-before: auto; }
 
+/* A heading stranded at the foot of a page helps nobody. */
+h2, h3 { break-after: avoid; }
+
 /* --- tables ------------------------------------------------------------- */
+/*
+ * Two kinds. A .detail-table is short and stays whole on one page (5.5). A
+ * .data-table is a list that may run past a page end, so it breaks and repeats
+ * its header rather than being pushed whole onto the next page.
+ */
 
 table {
   border-collapse: collapse;
   width: 100%;
+  margin: 0 0 4mm;
+}
+
+.data-table thead { display: table-header-group; }
+.data-table tr { break-inside: avoid; }
+
+thead th {
+  font-size: 7.5pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #555;
+  border-bottom: 1pt solid var(--primary-colour);
+  padding-bottom: 2pt;
+}
+
+td, tbody th {
+  border-bottom: 0.4pt solid #dcdcdc;
+  vertical-align: top;
 }
 
 th, td {
   text-align: left;
-  padding: 3pt 6pt;
-  border-bottom: 0.5pt solid #d5d5d5;
-  vertical-align: top;
+  padding: 3.5pt 6pt 3.5pt 0;
 }
 
-th {
-  font-weight: bold;
+th:last-child, td:last-child { padding-right: 0; }
+
+tbody th {
+  font-weight: normal;
   color: #333;
+  width: 34%;
 }
 
-/* Long identifiers break rather than overflow their cell (2.4). */
-td, th { overflow-wrap: anywhere; }
+/* Figures line up on their last digit, which is how a column of counts is
+ * read. Long identifiers break rather than overflow their cell (2.4);
+ * break-word rather than anywhere, since anywhere also shrinks a column's
+ * minimum width and splits ordinary checkpoint ids across lines. */
+.figure { text-align: right; font-variant-numeric: tabular-nums; }
+td, th { overflow-wrap: break-word; }
+
+/* A note explaining a mark used in the table above it. */
+.table-note {
+  font-size: 8pt;
+  color: #555;
+  margin: -2mm 0 5mm;
+}
 
 /* --- status badges ------------------------------------------------------ */
 
 .badge {
   display: inline-block;
-  padding: 3pt 10pt;
+  padding: 3pt 11pt;
   border: 1pt solid currentColor;
   border-radius: 2pt;
   font-weight: bold;
-  letter-spacing: 0.06em;
+  font-size: 11pt;
+  letter-spacing: 0.08em;
 }
 
 .badge-pass { color: #1a6b34; }
 .badge-fail { color: #9b1c1c; }
 .badge-warn { color: #8a5a00; }
 
-/* Any verdict the record carries that 2.2 does not list still renders, in the
- * neutral style, because 11 forbids mapping it onto a known one. */
+/* A verdict 2.2 does not list still renders, in the neutral style, because 11
+ * forbids mapping it onto a known one. */
 .badge-other { color: #333; }
+
+/* --- saying what is not there ------------------------------------------- */
+/*
+ * 0 and 3.6: a gap is stated in words, in the place the missing thing would
+ * have been. Colour only ever repeats what the words already say.
+ */
+
+.absent { color: #9b1c1c; }
+.absent-strong { color: #9b1c1c; font-weight: bold; }
+
+/* A row whose declared figure and computed figure do not match. The row is
+ * marked with an asterisk in the template as well as coloured here, so the
+ * conflict survives a monochrome print. */
+.count-disagrees th,
+.count-disagrees td {
+  color: #9b1c1c;
+  font-weight: bold;
+}
+
+.conflicts {
+  margin: 0 0 4mm;
+  padding-left: 4.5mm;
+}
+
+.conflicts li {
+  margin-bottom: 1.5mm;
+  color: #9b1c1c;
+}
 
 /* --- the cover ---------------------------------------------------------- */
 
 .cover-logo {
   max-height: 18mm;
-  margin-bottom: 14mm;
+  margin-bottom: 12mm;
 }
 
 .cover-facility-id {
-  font-size: 10pt;
+  font-size: 9.5pt;
   color: #555;
-  margin: 0 0 10mm;
+  margin: 0 0 9mm;
 }
 
-.cover-verdict {
-  margin: 0 0 12mm;
-  font-size: 13pt;
-}
+.cover-verdict { margin: 0 0 11mm; }
 
-.cover-run-table { margin-bottom: 12mm; }
-.cover-run-table th { width: 32%; }
+.cover-run-table { margin-bottom: 11mm; }
 
-.cover-counts th { width: 60%; }
-.cover-counts td { text-align: right; }
+.cover-counts tbody th { width: 62%; }
+.cover-counts .count-figure { font-weight: bold; font-size: 10.5pt; }
 
-.cover-counts .count-figure {
-  font-weight: bold;
-  font-size: 11pt;
-}
-
-/* A figure the record's own claim disagrees with. 2.9 forbids printing one
- * without the other, so the declared value sits beside it, marked. */
-.count-disagrees .count-figure { color: #9b1c1c; }
-
+/* The record's own claim, printed beside a computed figure it disagrees with.
+ * 2.9 forbids showing one without the other. */
 .count-declared {
   color: #9b1c1c;
   font-weight: normal;
+  font-size: 8.5pt;
   white-space: nowrap;
 }
 
-/* --- statements about what is not there --------------------------------- */
+/* --- the coverage page -------------------------------------------------- */
 
-/* 0 and 3.6: a gap is said in words, in the place the missing thing would be. */
-.absent {
-  color: #9b1c1c;
-  font-weight: bold;
+.reconciliation { margin-bottom: 2mm; }
+.reconciliation tbody th { width: 46%; }
+.reconciliation .figure { width: 27%; }
+
+/* A field name quoted inside running text. */
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 0.92em;
 }

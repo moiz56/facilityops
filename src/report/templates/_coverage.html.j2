@@ -1,0 +1,109 @@
+{# Coverage and reconciliation - 3.3.
+
+   Two columns, Declared and Computed, for each of the seven rows. A row where
+   the two disagree is marked with an asterisk and stated in words below, since
+   2.9 forbids printing one figure without the other and colour alone would not
+   survive a photocopy.
+
+   Under the table: every checkpoint the robot did not reach, with the reason it
+   recorded, and every checkpoint that captured no evidence, with what the check
+   observed. Both lists are built from detect_gaps' output, so they name the
+   same checkpoints the manifest does (4.4, 5.4). #}
+<section class="section coverage">
+
+  <h2>Coverage and reconciliation</h2>
+
+  <p class="lede">
+    Declared is what the record reported. Computed is what its checkpoint array
+    actually contains. Where the two differ, both figures are printed; neither
+    is preferred over the other.
+  </p>
+
+  <table class="reconciliation">
+    <thead>
+      <tr>
+        <th>Row</th>
+        <th class="figure">Declared</th>
+        <th class="figure">Computed</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in count_rows %}
+        <tr{% if row.disagrees %} class="count-disagrees"{% endif %}>
+          <th>{{ row.label }}{% if row.disagrees %} *{% endif %}</th>
+          <td class="figure">{{ row.declared | show("Not declared") }}</td>
+          <td class="figure">{{ row.computed }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if counts_disagree %}
+    <p class="table-note">* Declared and computed disagree. Each conflict is stated below.</p>
+  {% endif %}
+
+  {% if count_conflicts %}
+    <h3>Count conflicts</h3>
+    <p class="lede">
+      Each row above where the record's declared count and its own data
+      disagree, stated in full. Both figures are printed; neither is corrected.
+    </p>
+    <ul class="conflicts">
+      {% for gap in count_conflicts %}
+        <li>{{ gap.detail }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {% if empty_record %}
+    {# Neither list below can say anything true about a run with no
+       checkpoints: "every checkpoint was reached" is vacuously true and reads
+       as a finding. 3.6 asks for a plain statement instead. #}
+    <h3>Checkpoints</h3>
+    <p class="absent-strong">No checkpoints were recorded for this run.</p>
+  {% else %}
+
+    <h3>Checkpoints not reached</h3>
+    {% if missed %}
+      <table class="data-table">
+        <thead>
+          <tr><th>Checkpoint</th><th>ID</th><th>Reason recorded</th></tr>
+        </thead>
+        <tbody>
+          {% for item in missed %}
+            <tr>
+              <td>{{ item.checkpoint_name }}</td>
+              <td>{{ item.checkpoint_id }}</td>
+              <td class="absent">{{ item.detail }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>Every checkpoint on the route was reached.</p>
+    {% endif %}
+
+    <h3>Checkpoints with no evidence</h3>
+    {% if no_evidence %}
+      <table class="data-table">
+        <thead>
+          <tr><th>Checkpoint</th><th>ID</th><th>Observed</th><th>Why</th></tr>
+        </thead>
+        <tbody>
+          {% for item in no_evidence %}
+            <tr>
+              <td>{{ item.checkpoint_name }}</td>
+              <td>{{ item.checkpoint_id }}</td>
+              <td>{{ item.observed | show }}</td>
+              <td class="absent">{{ item.detail }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>Every checkpoint recorded at least one evidence image.</p>
+    {% endif %}
+
+  {% endif %}
+
+</section>

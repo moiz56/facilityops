@@ -32,14 +32,16 @@ from common.paths import setting
 from common.provenance import Provenance, stamp
 from common.schema import Record
 from report.derive import DerivedValues
-from report.gaps import Gap
+from report.gaps import RUN_LEVEL, Gap, GapType, disagreeing_counts
 from report.images import DirectionCell
 
 logger = logging.getLogger("report.render")
 
 __all__ = [
-    "TEMPLATE_DIR", "STYLES_PATH", "SECTION_NAMES", "HeadlineCount",
-    "environment", "show", "moment", "sections", "headline_counts",
+    "TEMPLATE_DIR", "STYLES_PATH", "SECTION_NAMES",
+    "environment", "show", "moment", "sections",
+    "CountRow", "count_rows", "CoverageItem", "coverage_items",
+    "run_count_conflicts",
     "VERDICT_STYLES", "verdict_style",
     "provenance_line", "logo_uri", "css_string", "runtime_css",
     "render_html", "render_pdf",
@@ -98,11 +100,13 @@ def environment() -> Environment:
     return env
 
 
-# --- the cover's counts ------------------------------------------------------
+# --- the counts, shared by the cover and the coverage page -------------------
 
-#: The cover's figures, in the order 3.3 lists the same rows.
+#: The seven rows of 3.3, labelled as 3.3 labels them. The cover prints the same
+#: figures as its headline counts, so both pages read from one list and cannot
+#: show different numbers for the same row.
 COUNT_LABELS = (
-    ("required", "Checkpoints required"),
+    ("required", "Required checkpoints"),
     ("completed", "Completed"),
     ("passed", "Passed"),
     ("failed", "Failed"),
@@ -113,8 +117,8 @@ COUNT_LABELS = (
 
 
 @dataclass(frozen=True)
-class HeadlineCount:
-    """One figure on the cover, with the record's own claim beside it."""
+class CountRow:
+    """One row of 3.3: what the record declared, and what its arrays hold."""
 
     label: str
     computed: int | None
@@ -122,24 +126,23 @@ class HeadlineCount:
     disagrees: bool
 
 
-def headline_counts(derived: DerivedValues) -> list[HeadlineCount]:
-    """The cover's headline counts, and where the record disagrees with them.
+def count_rows(derived: DerivedValues, disagreeing: set[str]) -> list[CountRow]:
+    """The seven rows of the reconciliation table.
 
-    The computed figure is the one printed, because it is what the rest of the
-    report is built from. Where the declared figure differs it is printed beside
-    it and marked, since 2.9 forbids silently preferring one. Reconciling the
-    two in full is the coverage page's job (3.3), and this says which rows to
-    turn to.
+    Declared is copied from the record and never corrected; computed is what the
+    arrays actually contain.
+
+    `disagreeing` is gaps.disagreeing_counts' answer, not a comparison made
+    here. The row that is marked on the page is therefore the same row that
+    raised the COUNT_MISMATCH gap in the manifest, by construction rather than
+    by two comparisons happening to match (5.4).
     """
     return [
-        HeadlineCount(
+        CountRow(
             label=label,
             computed=getattr(derived.computed, name),
             declared=getattr(derived.declared, name),
-            disagrees=(
-                getattr(derived.declared, name) is not None
-                and getattr(derived.declared, name) != getattr(derived.computed, name)
-            ),
+            disagrees=name in disagreeing,
         )
         for name, label in COUNT_LABELS
     ]
@@ -154,6 +157,60 @@ VERDICT_STYLES = {"PASS": "pass", "FAIL": "fail", "WARN": "warn"}
 def verdict_style(final_status: str) -> str:
     """The badge style for a verdict, or the neutral one for an unlisted value."""
     return VERDICT_STYLES.get(final_status, "other")
+
+
+# --- what sits under the reconciliation table (3.3) --------------------------
+
+
+@dataclass(frozen=True)
+class CoverageItem:
+    """One checkpoint listed beneath the reconciliation table."""
+
+    checkpoint_id: str
+    checkpoint_name: str
+    detail: str
+    observed: str | None
+
+
+def coverage_items(record: Record, gaps: list[Gap], gap_type: GapType) -> list[CoverageItem]:
+    """The checkpoints carrying one kind of gap, each with the detail it was given.
+
+    Built from detect_gaps' output rather than by testing the checkpoints over
+    again, so the list under the table and the manifest's gaps array cannot
+    describe different checkpoints (4.4, 5.4).
+
+    A gap whose checkpoint cannot be found is still listed, under its own id.
+    Dropping it would hide something the manifest reports.
+    """
+    by_id = {checkpoint.checkpoint_id: checkpoint for checkpoint in record.checkpoints}
+
+    items = []
+    for gap in gaps:
+        if gap.gap_type is not gap_type:
+            continue
+        checkpoint = by_id.get(gap.item_id)
+        items.append(CoverageItem(
+            checkpoint_id=gap.item_id,
+            checkpoint_name=checkpoint.checkpoint_name if checkpoint else gap.item_id,
+            detail=gap.detail,
+            observed=checkpoint.observed if checkpoint else None,
+        ))
+    return items
+
+
+def run_count_conflicts(gaps: list[Gap]) -> list[Gap]:
+    """Every count conflict belonging to the run rather than to a checkpoint.
+
+    The table marks which rows disagree; these say in words what each conflict
+    was. That includes the one 2.9 singles out and TA-23 tests, which is not one
+    of the seven rows at all: a run can declare no warned checkpoints, have none
+    with result_status WARN, and still carry a sensor warning at almost every
+    checkpoint.
+    """
+    return [
+        gap for gap in gaps
+        if gap.gap_type is GapType.COUNT_MISMATCH and gap.item_id == RUN_LEVEL
+    ]
 
 
 # --- config and provenance ---------------------------------------------------
@@ -236,7 +293,7 @@ def render_html(
     Separate from render_pdf so the markup can be read and tested without
     producing a document.
     """
-    headline = headline_counts(derived)
+    rows = count_rows(derived, disagreeing_counts(record))
     template = environment().get_template("full_report.html.j2")
     return template.render(
         record=record,
@@ -245,8 +302,14 @@ def render_html(
         grids=grids,
         sections=sections(config),
         logo_uri=logo_uri(config),
-        headline=headline,
-        counts_disagree=any(count.disagrees for count in headline),
+        count_rows=rows,
+        counts_disagree=any(row.disagrees for row in rows),
+        # Whether the run recorded no checkpoints is empty_record_gaps' answer,
+        # not a second test of the same array inside a template (5.4).
+        empty_record=any(gap.gap_type is GapType.EMPTY_RECORD for gap in gaps),
+        count_conflicts=run_count_conflicts(gaps),
+        missed=coverage_items(record, gaps, GapType.MISSED_CHECKPOINT),
+        no_evidence=coverage_items(record, gaps, GapType.NO_EVIDENCE),
         verdict_style=verdict_style(record.final_status),
     )
 

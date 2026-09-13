@@ -755,6 +755,7 @@ def test_ta24_finding_count_disagrees_with_the_findings_array() -> None:
     assert gaps[0].detail == "finding_count declared 3; 2 findings in the array"
 
 
+@pytest.mark.xfail(strict=True, reason="warned_checkpoints vs sensor.warnings removed pending question 17")
 def test_ta23_warned_checkpoints_against_sensor_warnings() -> None:
     """The contradiction the coverage rows cannot see."""
     warned = SensorWarning(code="temperature_high", severity="warning")
@@ -804,6 +805,7 @@ def test_a_count_the_record_never_declared_raises_nothing() -> None:
     assert count_mismatch_gaps(record) == []
 
 
+@pytest.mark.xfail(strict=True, reason="warned_checkpoints vs sensor.warnings removed pending question 17")
 @pytest.mark.skipif(not REFERENCE_RUN.is_file(), reason="reference run not present in data/")
 def test_reference_run_count_mismatch() -> None:
     """Every coverage row agrees; the sensor-warning contradiction does not."""
@@ -898,6 +900,7 @@ def test_detect_gaps_never_returns_none() -> None:
     assert detect_gaps(record, images) == []
 
 
+@pytest.mark.xfail(strict=True, reason="warned_checkpoints vs sensor.warnings removed pending question 17")
 @pytest.mark.skipif(not REFERENCE_RUN.is_file(), reason="reference run not present in data/")
 def test_reference_run_every_gap() -> None:
     record = load_record(REFERENCE_RUN)
@@ -964,6 +967,7 @@ def test_generated_at_is_iso_utc(reference_manifest: dict) -> None:
     assert datetime.strptime(reference_manifest["generated_at"], "%Y-%m-%dT%H:%M:%SZ")
 
 
+@pytest.mark.xfail(strict=True, reason="warned_checkpoints vs sensor.warnings removed pending question 17")
 @pytest.mark.skipif(not REFERENCE_RUN.is_file(), reason="reference run not present in data/")
 def test_checkpoints_with_gaps_counts_checkpoints_not_gaps(reference_manifest: dict) -> None:
     """23 gaps across 8 checkpoints, and the run itself, which does not count."""

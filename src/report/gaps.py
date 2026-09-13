@@ -29,7 +29,8 @@ __all__ = [
     "missed_checkpoint_gaps", "no_evidence_gaps", "missing_image_gaps",
     "missing_thermal_gaps", "sensor_unavailable_gaps", "subsystem_offline_gaps",
     "stale_reading_gaps", "no_findings_gaps", "count_mismatch_gaps",
-    "empty_record_gaps", "checkpoint_gaps", "run_gaps", "detect_gaps",
+    "empty_record_gaps", "disagreeing_counts", "checkpoint_gaps",
+    "run_gaps", "detect_gaps",
 ]
 
 #: item_id for a gap that belongs to the run itself rather than to a checkpoint.
@@ -369,16 +370,16 @@ def detect_gaps(
 # the data it describes. Where they disagree the report prints both figures and
 # flags the conflict; it never silently prefers one.
 #
-# Three separate checks produce COUNT_MISMATCH:
+# Two checks produce COUNT_MISMATCH:
 #
 #   the seven rows of the coverage page   declared vs the arrays      __run__
-#   warned_checkpoints vs sensor warnings  the contradiction of 2.9    __run__
 #   evidence_count vs evidence_images      per checkpoint (TA-25)      its id
 #
-# The second is not one of the seven rows, and that is the point of it. In the
-# reference run warned_checkpoints is 0 and no checkpoint has result_status
-# WARN, so that row agrees - while seven checkpoints carry a non-empty
-# sensor.warnings array. Comparing only the rows would report nothing.
+# A third was removed pending question 17: warned_checkpoints against the
+# checkpoints carrying a non-empty sensor.warnings array. 2.9's worked example
+# and TA-23 both describe that comparison, but 3.3 computes the Warned row from
+# result_status, so the two readings disagree about what warned_checkpoints is
+# a claim about. See count_mismatch_gaps.
 
 #: Each row of the coverage page: the Counts field, the record field it was
 #: declared in, and what the computed figure actually counted.
@@ -393,6 +394,26 @@ COUNT_ROWS = (
 )
 
 
+def disagreeing_counts(record: Record) -> set[str]:
+    """Which of the seven counts the record declared differ from its own arrays.
+
+    Named by their Counts field. Both the COUNT_MISMATCH gap below and the mark
+    on the coverage page's row read this, so the manifest and the page cannot
+    disagree about which row is wrong - two copies of the same comparison would
+    only agree until one of them changed (5.4).
+
+    A count the record never declared is not in the set: there is no claim for
+    the array to disagree with (decision 27).
+    """
+    declared = declared_counts(record)
+    computed = computed_counts(record)
+    return {
+        name for name, _, _ in COUNT_ROWS
+        if getattr(declared, name) is not None
+        and getattr(declared, name) != getattr(computed, name)
+    }
+
+
 def count_mismatch_gaps(record: Record) -> list[Gap]:
     """COUNT_MISMATCH: a declared count disagrees with the data it describes.
 
@@ -401,6 +422,7 @@ def count_mismatch_gaps(record: Record) -> list[Gap]:
     """
     declared = declared_counts(record)
     computed = computed_counts(record)
+    disagreeing = disagreeing_counts(record)
 
     gaps = [
         Gap(
@@ -409,20 +431,17 @@ def count_mismatch_gaps(record: Record) -> list[Gap]:
             f"{getattr(computed, name)} {counted}",
         )
         for name, field, counted in COUNT_ROWS
-        if getattr(declared, name) is not None
-        and getattr(declared, name) != getattr(computed, name)
+        if name in disagreeing
     ]
 
-    # The contradiction 2.9 singles out. Not one of the rows above: a run can
-    # declare no warned checkpoints, have none with result_status WARN, and
-    # still carry a sensor warning at almost every checkpoint.
-    with_warnings = sum(1 for c in record.checkpoints if c.sensor and c.sensor.warnings)
-    if declared.warned is not None and declared.warned != with_warnings:
-        gaps.append(Gap(
-            RUN_LEVEL, GapType.COUNT_MISMATCH,
-            f"warned_checkpoints declared {declared.warned}; "
-            f"{with_warnings} checkpoints carry sensor warnings",
-        ))
+    # Removed, pending question 17. warned_checkpoints was also cross-checked
+    # against the checkpoints carrying a non-empty sensor.warnings array, which
+    # is what 2.9's worked example and TA-23 describe. It is not one of 3.3's
+    # rows - 3.3 computes Warned from result_status - so it raised a second
+    # COUNT_MISMATCH on a row the table showed as agreeing. Until the client
+    # rules on which comparison was meant, the engine reports only the seven
+    # rows and the per-checkpoint evidence count. TA-23 does not pass in this
+    # state.
 
     # Each event that declared an evidence count, against the images that
     # checkpoint actually lists. Owned by the checkpoint, not the run.
