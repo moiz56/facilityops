@@ -232,6 +232,14 @@
 
 116. Slot heights are 35mm and 20mm, which is what lets both rows of the grid sit on the page with the detail table for a checkpoint of ordinary length. They are not tuned so that every checkpoint in the supplied record fits: home_docking_station carries a no-evidence banner and a finding, and its grid breaks between the two rows with the heading repeated, which is exactly the behaviour 5.5 provides for. Sizing until this particular record fits would be sizing to a sample rather than to the contract, and any record with a longer expected_text or more warnings would break the fit again.
 
+117. The summary table's columns are chosen, not specified. 3.1 fixes the row - one per checkpoint across the whole run - and says nothing about what each row carries. These nine: sequence, checkpoint name with its id, zone, the status and result badges kept in separate columns for the reason 3.2 gives, how many directions produced a usable RGB and how many a usable thermal, what the sensor reported, and how many findings named the checkpoint. They are the figures a reader needs to find the checkpoint worth turning to, which is what a summary is for.
+
+118. Every figure in the summary is read back off the gaps already raised or a count already derived. `sensor_summary` asks the checkpoint's own gaps whether the reading was unavailable, which devices were offline and whether it was stale, rather than looking at the sensor block again; `evidence_tally` counts the resolved grid rather than the recorded paths. The table therefore cannot say a checkpoint was clean while the manifest says otherwise, which is 4.4 in both directions and 5.4's rule applied to a summary.
+
+119. Evidence is counted out of the grid's own length rather than a literal eight, so a config listing a different set of directions (5.7) still reads correctly. No total row, for the reason decision 89 gives for the zone table: 3.1 asks for one row per checkpoint and the run-level figures belong to the reconciliation page (3.3).
+
+120. The summary table declares its column widths and sets its own header type. The shared header style spaces its capitals out, which broke "THERMAL" and "FINDINGS" across two lines in a narrow column, and left to itself the table gave the status badge less room than the badge needs while breaking a zone name mid-word. Widths total 175mm of the 178mm available and are each sized to their longest real content. A zone name longer than its column still wraps rather than overflowing, which is the right behaviour for an input this engine has not seen.
+
 # Questions to raise
 
 1. branding.yaml is a standalone file but the config.yaml in the document contains a branding section, for now I have put both in the config.yaml making branding.yaml empty but is this the way to go

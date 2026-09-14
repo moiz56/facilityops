@@ -1,0 +1,82 @@
+{# Run summary table - 3.1.
+
+   One row per checkpoint across the whole run, so a reader can see the shape
+   of the run without working through every section. 3.1 fixes the row and
+   leaves the columns open; these are the two verdicts that 3.2 refuses to
+   collapse, how much of the evidence arrived, what the sensor reported, and
+   how many findings named the checkpoint.
+
+   Nothing is counted here. summary_rows read it all back off the gaps that
+   were already raised, so this table cannot say a checkpoint was clean when
+   the manifest says otherwise (4.4, 5.4). #}
+<section class="section summary">
+
+  <h2>Run summary</h2>
+
+  {% if summary_rows %}
+
+    <p class="lede">
+      Every checkpoint on the route, in the order it was recorded. Evidence
+      counts are the directions that produced a usable image; a direction whose
+      image is missing or will not open is not counted as captured.
+    </p>
+
+    <table class="data-table summary-table">
+      <colgroup>
+        <col class="col-seq">
+        <col class="col-name">
+        <col class="col-zone">
+        <col class="col-status">
+        <col class="col-result">
+        <col class="col-rgb">
+        <col class="col-thermal">
+        <col class="col-sensor">
+        <col class="col-count">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Checkpoint</th>
+          <th>Zone</th>
+          <th>Status</th>
+          <th>Result</th>
+          <th>RGB</th>
+          <th>Thermal</th>
+          <th>Sensor</th>
+          <th>Findings</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in summary_rows %}
+          {% set point = row.checkpoint %}
+          <tr>
+            <td class="figure">{{ point.sequence_number | show("-") }}</td>
+            <td>
+              {{ point.checkpoint_name }}
+              <span class="summary-id">{{ point.checkpoint_id }}</span>
+            </td>
+            <td>{{ point.zone }}</td>
+            <td>
+              <span class="badge badge-small badge-{{ point.status | status_style }}">
+                {{- point.status -}}
+              </span>
+            </td>
+            <td>
+              <span class="badge badge-small badge-{{ point.result_status | verdict_style }}">
+                {{- point.result_status -}}
+              </span>
+            </td>
+            <td class="figure">{{ row.rgb }}</td>
+            <td class="figure">{{ row.thermal }}</td>
+            <td>{{ row.sensor }}</td>
+            <td class="figure">{{ row.findings }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+  {% else %}
+    <p class="absent-note">No checkpoints were recorded for this run.</p>
+  {% endif %}
+
+</section>

@@ -54,6 +54,7 @@ __all__ = [
     "SENSOR_BLOCKS", "SensorBlockView", "SensorView", "reading",
     "sensor_block_view", "sensor_view",
     "CheckpointView", "checkpoint_views", "ZoneGroup", "zone_groups",
+    "SummaryRow", "evidence_tally", "sensor_summary", "summary_rows",
     "ZONE_COLUMNS", "measure", "device_name", "zone_absence",
     "provenance_line", "logo_uri", "css_string", "runtime_css",
     "render_html", "render_pdf",
@@ -700,6 +701,87 @@ def zone_groups(views: Sequence[CheckpointView]) -> list[ZoneGroup]:
     return [ZoneGroup(zone=zone, checkpoints=tuple(group)) for zone, group in grouped.items()]
 
 
+# --- the run summary table (3.1) ---------------------------------------------
+#
+# One row per checkpoint across the whole run. 3.1 fixes the row and says
+# nothing about the columns, so these are chosen: the two verdicts that cannot
+# be collapsed, how much of the evidence arrived, what the sensor reported, and
+# how many findings named the checkpoint. Every one is read back off the gaps
+# or off a count already derived - nothing is worked out twice (decision 117).
+
+
+@dataclass(frozen=True)
+class SummaryRow:
+    """One checkpoint's line in the run summary."""
+
+    checkpoint: Checkpoint
+    rgb: str
+    thermal: str
+    sensor: str
+    findings: int
+
+
+def evidence_tally(grid: Sequence[DirectionCell]) -> tuple[str, str]:
+    """How many of the directions carry a usable RGB image, and a usable thermal.
+
+    Counted out of the grid's own length rather than a fixed eight, so a config
+    listing a different set of directions (5.7) still reads correctly.
+    """
+    total = len(grid)
+    rgb = sum(1 for cell in grid if cell.rgb is not None and cell.rgb.readable)
+    thermal = sum(1 for cell in grid if cell.thermal is not None and cell.thermal.readable)
+    return f"{rgb} of {total}", f"{thermal} of {total}"
+
+
+def sensor_summary(gaps: Sequence[Gap]) -> str:
+    """What one checkpoint's sensor reported, in a few words.
+
+    Reads the gaps already raised for that checkpoint. The table cannot say a
+    reading was fine when detect_gaps found something wrong with it, because it
+    is the same list the manifest carries (4.4).
+    """
+    kinds = {gap.gap_type: gap for gap in gaps}
+    if GapType.SENSOR_UNAVAILABLE in kinds:
+        return "Unavailable"
+
+    offline = [
+        device_name(gap.detail.split("=", 1)[0])
+        for gap in gaps if gap.gap_type is GapType.SUBSYSTEM_OFFLINE
+    ]
+    stale = "stale" if GapType.STALE_READING in kinds else None
+
+    parts = [", ".join(offline) + " offline"] if offline else []
+    if stale:
+        parts.append(stale)
+    return "; ".join(parts) if parts else "Recorded"
+
+
+def summary_rows(
+    record: Record, grids: dict[str, Sequence[DirectionCell]], gaps: Sequence[Gap],
+) -> list[SummaryRow]:
+    """One row per checkpoint, in the order the record listed them.
+
+    No total row. 3.1 asks for one row per checkpoint and nothing else, and the
+    figures a total would add are the reconciliation page's job (3.3) - the same
+    reasoning as decision 89 for the zone table.
+    """
+    rows = []
+    for checkpoint in record.checkpoints:
+        mine = [gap for gap in gaps if gap.item_id == checkpoint.checkpoint_id]
+        rgb, thermal = evidence_tally(grids.get(checkpoint.checkpoint_id, ()))
+        rows.append(SummaryRow(
+            checkpoint=checkpoint,
+            rgb=rgb,
+            thermal=thermal,
+            sensor=sensor_summary(mine),
+            findings=sum(
+                1 for finding in record.findings
+                if finding.checkpoint_id == checkpoint.checkpoint_id
+            ),
+        ))
+    return rows
+
+
 # --- the zone telemetry summary (3.4) ----------------------------------------
 #
 # One row per zone: the sample count, the min, mean and max of three
@@ -895,6 +977,7 @@ def render_html(
         # rather than by the page and the manifest agreeing twice over (5.4).
         checkpoint_zones=zone_groups(checkpoint_views(record, grids, gaps, image_dir)),
         grid_columns=GRID_COLUMNS,
+        summary_rows=summary_rows(record, grids, gaps),
     )
 
 

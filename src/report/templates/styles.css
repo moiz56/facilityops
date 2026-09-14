@@ -658,3 +658,49 @@ h5 {
   border-left: 2pt solid #c8c8c8;
   color: #333;
 }
+
+
+/* --- the run summary table (3.1) ---------------------------------------- */
+/*
+ * Nine columns across 178mm, so the widths are declared rather than left to
+ * the content: a long checkpoint id would otherwise take the space the badges
+ * and counts need. A run can carry sixty rows, so the header repeats and no
+ * row splits (.data-table above sets both).
+ */
+
+.summary-table {
+  table-layout: fixed;
+  font-size: 7.5pt;
+}
+
+.summary-table .badge-small { width: auto; padding-left: 3pt; padding-right: 3pt; }
+
+/* The shared header style spaces its capitals out, which is right for a wide
+ * column and wrong for a narrow one - it broke "THERMAL" and "FINDINGS" across
+ * two lines. This table sets its own. */
+.summary-table thead th {
+  font-size: 6.8pt;
+  letter-spacing: 0.02em;
+}
+
+/* Widths add to 174mm of the 178mm available. Each is sized to its longest
+ * real content rather than shared out evenly: the status badge is the widest
+ * fixed thing on the row, and a zone name has to sit on one line or it breaks
+ * mid-word. */
+.col-seq     { width: 6mm; }
+.col-name    { width: 32mm; }
+.col-zone    { width: 33mm; }
+.col-status  { width: 22mm; }
+.col-result  { width: 14mm; }
+.col-rgb     { width: 12mm; }
+.col-thermal { width: 17mm; }
+.col-sensor  { width: 25mm; }
+.col-count   { width: 14mm; }
+
+/* The id under the name, for the same reason the checkpoint heading carries
+ * both: the name is what a reader recognises, the id is what they search. */
+.summary-id {
+  display: block;
+  font-size: 6.5pt;
+  color: #666;
+}
