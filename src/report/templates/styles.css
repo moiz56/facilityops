@@ -237,3 +237,111 @@ code {
   font-family: "DejaVu Sans Mono", monospace;
   font-size: 0.92em;
 }
+
+/* --- the findings summary ----------------------------------------------- */
+
+.findings-count { margin: 0 0 4mm; }
+
+/* Room for the section to breathe between one block and the next. The first
+ * heading sits closer, since the count line above it is a single sentence. */
+.findings h3 { margin-top: 11mm; }
+.findings h3:first-of-type { margin-top: 8mm; }
+
+/* What a block says when it holds nothing. Quiet, because an absence stated is
+ * not a finding - but stated, because a blank says nothing at all (0). */
+.absent-note { color: #555; }
+
+/* Fixed layout, so these widths are what the columns get. Left to itself the
+ * table gives a long token like sensor_threshold_warning whatever width it
+ * asks for and starves the columns beside it.
+ *
+ * Every value in the index row fits its column on one line: a checkpoint id as
+ * long as home_docking_station, a feature as long as
+ * sensor_threshold_warning, and a full timestamp with its offset. */
+.findings-table { table-layout: fixed; }
+
+.findings-table th:nth-child(1) { width: 10%; }
+.findings-table th:nth-child(2) { width: 22%; }
+.findings-table th:nth-child(3) { width: 25%; }
+.findings-table th:nth-child(4) { width: 15%; }
+.findings-table th:nth-child(5) { width: 28%; }
+
+/* Each finding is a tbody of two rows: the table row, and a continuation row
+ * holding the recommended action, the position and the long identifier 2.4
+ * warns about. Keeping the pair together is what stops TA-06 finding a finding
+ * split across a page break. */
+.finding { break-inside: avoid; }
+
+/* One finding is one block. No rules inside it, a rule and clear space above
+ * the next, so the eye reads three entries and not six rows. */
+.finding td { border-bottom: none; }
+
+.finding + .finding > tr:first-child > td {
+  border-top: 0.4pt solid #d4d4d4;
+  padding-top: 6pt;
+}
+
+.findings-table { border-bottom: 0.4pt solid #d4d4d4; }
+
+.finding > tr:first-child > td { padding-bottom: 2pt; }
+
+.finding-detail td {
+  padding-top: 0;
+  padding-bottom: 6pt;
+  font-size: 8pt;
+  color: #444;
+}
+
+/* A hanging indent: the label sits in the margin the line reserves for it, so
+ * a value that runs to a second line stays aligned under the first rather than
+ * dropping back under its own label. */
+.finding-line {
+  display: block;
+  margin-top: 1.2mm;
+  padding-left: 26mm;
+}
+
+/* The label that names what a line of the detail block holds. Set apart from
+ * the value so a reader scans the labels, not the sentences. */
+.finding-label {
+  display: inline-block;
+  width: 26mm;
+  margin-left: -26mm;
+  vertical-align: top;
+  font-size: 6.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #777;
+}
+
+/* The colon-delimited finding_id of 2.4. Monospaced because it is an
+ * identifier to be copied rather than read, and given the width of the row so
+ * it wraps instead of overflowing a column. */
+.finding-id {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 7pt;
+  color: #666;
+}
+
+.finding-zone {
+  display: block;
+  font-size: 8pt;
+  color: #666;
+}
+
+/* A badge inside a table cell. Lighter than the cover's verdict badge, which
+ * is the one thing on its page; here a dozen of them share a column. */
+.badge-small {
+  padding: 1.5pt 0;
+  width: 15mm;
+  text-align: center;
+  border-width: 0.5pt;
+  font-size: 6.5pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* 2.4's third severity. Distinct from .badge-other, which is what an
+ * unlisted value renders as. */
+.badge-info { color: #33506b; }

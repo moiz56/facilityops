@@ -12,20 +12,24 @@ from PIL import Image
 
 from common.loader import load_record
 from common.paths import (
-    DIRECTIONS, PATH_PREFIX, THERMAL_SUFFIX, ConfigError, ResolvedImage, load_config, setting,
+    CONFIG_PATH, DIRECTIONS, PATH_PREFIX, THERMAL_SUFFIX, ConfigError, ResolvedImage,
+    load_config, setting,
     parse_filename, resolve_checkpoint_images, resolve_evidence, resolve_record_images,
 )
 from report.cli import dump_artifacts, run_pipeline, write_json
 from common.schema import (
     Accelerometer, Checkpoint, Environment, Event, Finding, Particulate, RawSensor,
-    Record, SensorBlock, SensorWarning,
+    Point2D, Pose, Record, SensorBlock, SensorWarning,
 )
-from report.derive import computed_counts, declared_counts
+from report.derive import computed_counts, declared_counts, derive_report_values
+from report.render import (
+    FindingGroup, count_rows, finding_groups, place, render_html, severity_style,
+)
 from report.manifest import (
     PLACEHOLDER_FIELDS, build_manifest, config_hash, write_manifest,
 )
 from report.gaps import (
-    RUN_LEVEL, Gap, GapType, checkpoint_gaps, missed_checkpoint_gaps,
+    RUN_LEVEL, Gap, GapType, checkpoint_gaps, disagreeing_counts, missed_checkpoint_gaps,
     missing_image_gaps, missing_thermal_gaps, no_evidence_gaps,
     count_mismatch_gaps, detect_gaps, empty_record_gaps, no_findings_gaps,
     sensor_unavailable_gaps, stale_reading_gaps, subsystem_offline_gaps,
@@ -1024,3 +1028,187 @@ def test_write_manifest_names_the_file_after_the_run(
 def test_placeholder_fields_are_named() -> None:
     """Nothing should ship believing page_count or sections are real."""
     assert PLACEHOLDER_FIELDS == ("page_count", "sections")
+
+
+# --- the findings summary (3.1) --------------------------------------------
+#
+# 3.6 gives one rule about which block a finding lands in: an abstained finding
+# is shown as requiring review, never as a confirmed finding, and never dropped
+# (TA-05). 11 forbids mapping a status section 2 does not list onto one it
+# does, so a third block holds those and claims nothing about them.
+
+
+def finding(status: str, severity: str = "fail", checkpoint_id: str = "checkpoint_1") -> Finding:
+    """One finding with the given status."""
+    return Finding(
+        finding_id=f"run:{checkpoint_id}:{status}",
+        severity=severity,
+        status=status,
+        checkpoint_id=checkpoint_id,
+        feature="general_condition",
+        description="something was found",
+    )
+
+
+def group_headed(groups: list[FindingGroup], heading: str) -> FindingGroup:
+    """The one group with that heading."""
+    return next(group for group in groups if group.heading == heading)
+
+
+def render_record(record: Record) -> str:
+    """One record rendered to HTML, with no images and no gaps."""
+    return render_html(record, [], derive_report_values(record), {}, load_config(CONFIG_PATH))
+
+
+def test_ta05_abstained_is_under_requires_review() -> None:
+    abstained = finding("abstained")
+    groups = finding_groups([abstained])
+
+    assert group_headed(groups, "Requires review").findings == (abstained,)
+    assert group_headed(groups, "Confirmed findings").findings == ()
+
+
+def test_confirmed_statuses_are_confirmed() -> None:
+    logged, acknowledged = finding("logged"), finding("acknowledged")
+    groups = finding_groups([logged, acknowledged])
+
+    assert group_headed(groups, "Confirmed findings").findings == (logged, acknowledged)
+    assert group_headed(groups, "Requires review").findings == ()
+
+
+def test_unlisted_status_is_not_mapped_onto_a_known_one() -> None:
+    """11: render it verbatim, record it, never map it onto a known value.
+
+    `needs_review` is the status 52 of the 54 supplied findings carry, and
+    section 2 does not list it. It is neither confirmed nor abstained.
+    """
+    unlisted = finding("needs_review")
+    groups = finding_groups([unlisted])
+
+    assert group_headed(groups, "Confirmed findings").findings == ()
+    assert group_headed(groups, "Requires review").findings == ()
+    assert group_headed(groups, "Findings with an unrecognised status").findings == (unlisted,)
+
+
+def test_every_finding_lands_in_exactly_one_group() -> None:
+    """3.1 asks for all run-level findings. None is dropped and none repeats."""
+    findings = [
+        finding("logged"), finding("acknowledged"), finding("abstained"),
+        finding("needs_review"), finding(""),
+    ]
+    grouped = [f for group in finding_groups(findings) for f in group.findings]
+
+    assert sorted(grouped, key=id) == sorted(findings, key=id)
+
+
+def test_the_blocks_the_brief_names_always_render() -> None:
+    """Both say so in words when empty, rather than leaving a blank."""
+    groups = finding_groups([finding("needs_review")])
+
+    assert group_headed(groups, "Confirmed findings").absent
+    assert group_headed(groups, "Requires review").absent
+
+
+def test_the_unrecognised_block_is_left_out_when_empty() -> None:
+    """It heads a category the brief does not have, so it is not printed empty."""
+    groups = finding_groups([finding("logged")])
+    unrecognised = group_headed(groups, "Findings with an unrecognised status")
+
+    assert unrecognised.findings == ()
+    assert unrecognised.absent is None
+
+
+def test_no_findings_gives_no_groups() -> None:
+    assert finding_groups([]) == []
+
+
+@pytest.mark.parametrize("severity, style", [
+    ("fail", "fail"), ("warning", "warn"), ("info", "info"),
+    ("critical", "other"), ("", "other"),
+])
+def test_severity_style(severity: str, style: str) -> None:
+    """2.4 lists three. Anything else renders in the neutral style (11)."""
+    assert severity_style(severity) == style
+
+
+@pytest.mark.parametrize("pose, expected", [
+    (Pose(x=1.5, y=-2.0, z=0.0, yaw=0.25), "x 1.5, y -2, z 0, yaw 0.25"),
+    (Point2D(x=1.5, y=-2.0), "x 1.5, y -2"),
+    (Pose(), None),
+    (None, None),
+])
+def test_place(pose: Pose | Point2D | None, expected: str | None) -> None:
+    """Only the keys carrying a value are named, so neither shape invents the other's."""
+    assert place(pose) == expected
+
+
+# --- the findings summary, rendered ----------------------------------------
+
+
+def test_ta05_abstained_renders_under_its_heading_and_is_not_dropped() -> None:
+    record = run_record(findings=(finding("abstained"),), finding_count=1)
+    html = render_record(record)
+
+    assert "Requires review" in html
+    assert "run:checkpoint_1:abstained" in html
+    assert "No finding was abstained." not in html
+
+
+def test_unlisted_status_renders_verbatim() -> None:
+    html = render_record(run_record(findings=(finding("needs_review"),), finding_count=1))
+
+    assert "needs_review" in html
+    assert "Findings with an unrecognised status" in html
+
+
+def test_ta24_both_figures_are_printed_when_the_count_disagrees() -> None:
+    """finding_count: 3 with two entries. Neither figure is silently preferred."""
+    record = run_record(
+        findings=(finding("logged"), finding("logged", checkpoint_id="checkpoint_2")),
+        finding_count=3,
+    )
+    html = render_record(record)
+
+    assert "2 findings recorded for this run." in html
+    assert "The record declares 3." in html
+
+
+def test_a_run_with_no_findings_says_so_once() -> None:
+    html = render_record(run_record(findings=(), finding_count=0))
+
+    assert html.count("No findings were recorded for this run.") == 1
+
+
+def test_ta29_free_text_is_escaped_not_executed() -> None:
+    """5.5: description and recommended_action render as literal text."""
+    dangerous = Finding(
+        finding_id="run:checkpoint_1:x",
+        severity="fail",
+        status="logged",
+        checkpoint_id="checkpoint_1",
+        description="<script>alert(1)</script>",
+        recommended_action="{{ config }}",
+    )
+    html = render_record(run_record(findings=(dangerous,), finding_count=1))
+
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "{{ config }}" in html
+
+
+def test_the_findings_count_is_the_coverage_page_count() -> None:
+    """One figure, not two comparisons that happen to agree (5.4)."""
+    record = run_record(findings=(finding("logged"),), finding_count=1)
+    rows = count_rows(derive_report_values(record), disagreeing_counts(record))
+
+    assert next(row for row in rows if row.name == "findings").computed == 1
+
+
+@pytest.mark.skipif(not REFERENCE_RUN.is_file(), reason="reference run not present in data/")
+def test_reference_run_renders_its_one_finding() -> None:
+    record = load_record(REFERENCE_RUN)
+    html = render_record(record)
+
+    assert "1 finding recorded for this run." in html
+    for one in record.findings:
+        assert one.finding_id in html

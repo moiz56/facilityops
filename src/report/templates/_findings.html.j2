@@ -1,0 +1,112 @@
+{# Findings summary - 3.1.
+
+   All run-level findings in a table. The same findings render again inside
+   their own checkpoint sections (3.2), because 3.2 asks for them "here as well
+   as in the summary".
+
+   Which table a finding lands in is finding_groups' answer, not a test made
+   here (5.4). 3.6 gives one rule - an abstained finding is shown as requiring
+   review, never as a confirmed finding, and never dropped - and 11 forbids
+   mapping a status section 2 does not list onto one it does, so a third block
+   holds those and claims nothing about them.
+
+   description and recommended_action are free text. Autoescaping is on, so a
+   field holding <script> or {{ '{{ config }}' }} renders as written (5.5). #}
+<section class="section findings">
+
+  <h2>Findings</h2>
+
+  <p class="findings-count">
+    {% if findings_row.computed %}
+      {{ findings_row.computed }} finding{{ "" if findings_row.computed == 1 else "s" }} recorded for this run.
+    {% else %}
+      No findings were recorded for this run.
+    {% endif %}
+    {% if findings_row.disagrees %}
+      <span class="absent-strong">The record declares {{ findings_row.declared | show("none") }}. Both figures are printed; neither is corrected. The conflict is set out on the coverage page.</span>
+    {% endif %}
+  </p>
+
+  {% for group in finding_groups %}
+    {% if group.findings or group.absent %}
+
+      <h3>{{ group.heading }}{% if group.findings %} ({{ group.findings | length }}){% endif %}</h3>
+
+      {% if group.findings %}
+        <p class="lede">{{ group.lede }}</p>
+        <table class="data-table findings-table">
+          <thead>
+            <tr>
+              <th>Severity</th>
+              <th>Checkpoint</th>
+              <th>Feature</th>
+              <th>Status</th>
+              <th>Recorded</th>
+            </tr>
+          </thead>
+          {# One tbody per finding, holding both its rows. styles.css keeps a
+             tbody whole, so a finding never straddles a page break (TA-06). #}
+          {% for finding in group.findings %}
+            <tbody class="finding">
+              <tr>
+                <td>
+                  <span class="badge badge-small badge-{{ finding.severity | severity_style }}">
+                    {{- finding.severity -}}
+                  </span>
+                </td>
+                <td>
+                  {{ finding.checkpoint_id | show }}
+                  {% if finding.zone and finding.zone != finding.checkpoint_id %}
+                    <span class="finding-zone">{{ finding.zone }}</span>
+                  {% endif %}
+                </td>
+                <td>{{ finding.feature | show }}</td>
+                <td>{{ finding.status }}</td>
+                <td>{{ finding.timestamp | moment }}</td>
+              </tr>
+              {# 2.4 warns that finding_id is long and must not overflow its
+                 cell, so the detail spans the row rather than sitting in a
+                 column that cannot hold it. The severity column is left clear,
+                 which indents the block under the finding it belongs to. #}
+              <tr class="finding-detail">
+                <td></td>
+                <td colspan="4">
+                  <span class="finding-line">
+                    <span class="finding-label">What was found</span>
+                    {{ finding.description | show }}
+                  </span>
+                  {% if finding.recommended_action %}
+                    <span class="finding-line">
+                      <span class="finding-label">Recommended</span>
+                      {{ finding.recommended_action }}
+                    </span>
+                  {% endif %}
+                  {% if finding.coordinates | place %}
+                    <span class="finding-line">
+                      <span class="finding-label">Position</span>
+                      {{ finding.coordinates | place }}
+                    </span>
+                  {% endif %}
+                  {% if finding.evidence_image %}
+                    <span class="finding-line">
+                      <span class="finding-label">Evidence</span>
+                      {{ finding.evidence_image }}
+                    </span>
+                  {% endif %}
+                  <span class="finding-line">
+                    <span class="finding-label">Reference</span>
+                    <span class="finding-id">{{ finding.finding_id }}</span>
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          {% endfor %}
+        </table>
+      {% else %}
+        <p class="absent-note">{{ group.absent }}</p>
+      {% endif %}
+
+    {% endif %}
+  {% endfor %}
+
+</section>

@@ -23,6 +23,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Sequence
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from weasyprint import CSS, HTML
@@ -30,7 +31,7 @@ from weasyprint import CSS, HTML
 from common import OUTPUT_DIR, PROJECT_ROOT
 from common.paths import setting
 from common.provenance import Provenance, stamp
-from common.schema import Record
+from common.schema import Finding, Point2D, Pose, Record
 from report.derive import DerivedValues
 from report.gaps import RUN_LEVEL, Gap, GapType, disagreeing_counts
 from report.images import DirectionCell
@@ -43,6 +44,8 @@ __all__ = [
     "CountRow", "count_rows", "CoverageItem", "coverage_items",
     "run_count_conflicts",
     "VERDICT_STYLES", "verdict_style",
+    "SEVERITY_STYLES", "severity_style", "place",
+    "CONFIRMED_STATUSES", "REVIEW_STATUS", "FindingGroup", "finding_groups",
     "provenance_line", "logo_uri", "css_string", "runtime_css",
     "render_html", "render_pdf",
 ]
@@ -81,6 +84,24 @@ def moment(value: datetime | None, absent: str = "Not recorded") -> str:
     return value.strftime("%Y-%m-%d %H:%M:%S %z")
 
 
+def place(pose: Pose | Point2D | None) -> str | None:
+    """Where something was recorded, as text, or None when nowhere was.
+
+    Only the keys carrying a value are named. A two-key alert position and a
+    four-key checkpoint pose therefore read the same way without either
+    inventing the other's fields (2.5).
+    """
+    if pose is None:
+        return None
+    named = (
+        ("x", getattr(pose, "x", None)),
+        ("y", getattr(pose, "y", None)),
+        ("z", getattr(pose, "z", None)),
+        ("yaw", getattr(pose, "yaw", None)),
+    )
+    return ", ".join(f"{name} {value:g}" for name, value in named if value is not None) or None
+
+
 def environment() -> Environment:
     """The Jinja environment every template renders in.
 
@@ -97,6 +118,8 @@ def environment() -> Environment:
     )
     env.filters["show"] = show
     env.filters["moment"] = moment
+    env.filters["place"] = place
+    env.filters["severity_style"] = severity_style
     return env
 
 
@@ -120,6 +143,7 @@ COUNT_LABELS = (
 class CountRow:
     """One row of 3.3: what the record declared, and what its arrays hold."""
 
+    name: str             # the Counts field, so a section can ask for one row
     label: str
     computed: int | None
     declared: int | None
@@ -139,6 +163,7 @@ def count_rows(derived: DerivedValues, disagreeing: set[str]) -> list[CountRow]:
     """
     return [
         CountRow(
+            name=name,
             label=label,
             computed=getattr(derived.computed, name),
             declared=getattr(derived.declared, name),
@@ -210,6 +235,100 @@ def run_count_conflicts(gaps: list[Gap]) -> list[Gap]:
     return [
         gap for gap in gaps
         if gap.gap_type is GapType.COUNT_MISMATCH and gap.item_id == RUN_LEVEL
+    ]
+
+
+# --- the findings summary (3.1) ----------------------------------------------
+#
+# 3.1 asks for every run-level finding in a table, and 3.6 gives exactly one
+# rule about which table: an abstained finding is shown as requiring review,
+# not as a confirmed finding, and is never dropped.
+#
+# That rule names one status. 2.4 lists two others, `logged` and
+# `acknowledged`, and those are what "confirmed" can mean here. A status that
+# is none of the three is neither: 11 says an enum value section 2 does not
+# list renders verbatim and is never mapped onto a known one, so it cannot be
+# shown as confirmed and cannot be shown as abstained either. It gets its own
+# block, which is the only place left that claims nothing about it.
+
+#: The statuses 2.4 lists, other than the one 3.6 gives a rule for.
+CONFIRMED_STATUSES = ("logged", "acknowledged")
+
+#: The status 3.6 and TA-05 single out.
+REVIEW_STATUS = "abstained"
+
+#: Severity -> badge style. 2.4 lists info, warning and fail, lowercase and
+#: unlike the status values elsewhere. A severity nobody listed renders as
+#: written in the neutral style, for the same reason verdict_style does (11).
+SEVERITY_STYLES = {"fail": "fail", "warning": "warn", "info": "info"}
+
+
+def severity_style(severity: str) -> str:
+    """The badge style for a finding's severity, or the neutral one."""
+    return SEVERITY_STYLES.get(severity, "other")
+
+
+@dataclass(frozen=True)
+class FindingGroup:
+    """One block of the findings summary: a heading, a sentence and its rows.
+
+    `absent` is what the block says when it holds nothing. None means the block
+    is left out entirely when empty.
+    """
+
+    heading: str
+    lede: str
+    findings: tuple[Finding, ...]
+    absent: str | None = None
+
+
+def finding_groups(findings: Sequence[Finding]) -> list[FindingGroup]:
+    """Every finding, split into the blocks the findings summary renders.
+
+    Each finding lands in exactly one block and none is dropped, so 3.1's "all
+    run-level findings" holds however a record spells a status.
+
+    A run that recorded none gets no blocks at all. Three headings each saying
+    nothing was there says less than one sentence does, and the template prints
+    that sentence instead.
+
+    The two blocks the brief names always render, with a sentence when they are
+    empty: "no finding was abstained" is a fact worth printing, and 0 asks for
+    an absence to be stated rather than left blank. The third block exists only
+    because a record used a status section 2 does not list, so it is left out
+    when empty rather than heading an empty block for a category the brief does
+    not have.
+    """
+    if not findings:
+        return []
+
+    listed = (*CONFIRMED_STATUSES, REVIEW_STATUS)
+    return [
+        FindingGroup(
+            heading="Confirmed findings",
+            lede="Findings the run recorded as logged or acknowledged.",
+            findings=tuple(f for f in findings if f.status in CONFIRMED_STATUSES),
+            absent="No finding was recorded as logged or acknowledged.",
+        ),
+        FindingGroup(
+            heading="Requires review",
+            lede=(
+                "The detector was not confident enough to call these. They are "
+                "not confirmed findings, and they have not been dropped: each "
+                "needs a person to decide."
+            ),
+            findings=tuple(f for f in findings if f.status == REVIEW_STATUS),
+            absent="No finding was abstained.",
+        ),
+        FindingGroup(
+            heading="Findings with an unrecognised status",
+            lede=(
+                "These carry a status this report does not recognise. Each is "
+                "printed exactly as recorded, and shown neither as confirmed "
+                "nor as requiring review: the record does not say which it is."
+            ),
+            findings=tuple(f for f in findings if f.status not in listed),
+        ),
     ]
 
 
@@ -311,6 +430,11 @@ def render_html(
         missed=coverage_items(record, gaps, GapType.MISSED_CHECKPOINT),
         no_evidence=coverage_items(record, gaps, GapType.NO_EVIDENCE),
         verdict_style=verdict_style(record.final_status),
+        finding_groups=finding_groups(record.findings),
+        # The Findings row of the reconciliation table, so the count at the head
+        # of the findings section and the coverage page are one figure and not
+        # two comparisons that happen to agree (5.4).
+        findings_row=next(row for row in rows if row.name == "findings"),
     )
 
 
