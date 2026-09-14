@@ -29,6 +29,7 @@ __all__ = [
     "missed_checkpoint_gaps", "no_evidence_gaps", "missing_image_gaps",
     "missing_thermal_gaps", "sensor_unavailable_gaps", "subsystem_offline_gaps",
     "stale_reading_gaps", "no_findings_gaps", "count_mismatch_gaps",
+    "offline_block_gaps",
     "empty_record_gaps", "disagreeing_counts", "checkpoint_gaps",
     "run_gaps", "detect_gaps",
 ]
@@ -291,6 +292,26 @@ def no_findings_gaps(checkpoint: Checkpoint, findings: Sequence[Finding]) -> lis
         checkpoint.checkpoint_id, GapType.NO_FINDINGS,
         "no findings recorded for this checkpoint",
     )]
+
+
+def offline_block_gaps(gaps: Sequence[Gap], block: str) -> list[Gap]:
+    """The SUBSYSTEM_OFFLINE gaps belonging to one sensor block.
+
+    Not a rule. A section that leaves a measurement out because its device was
+    off has to say so - 4.4 requires every manifest gap to appear in the PDF -
+    and this is how it asks which gaps those were, rather than testing the
+    flags a second time in a template (5.4, 5.5).
+
+    The flag is read back off the front of the detail this module wrote, so
+    there is no second copy of the flag-to-block mapping to fall out of step
+    with SUBSYSTEM_FLAGS.
+    """
+    flags = {flag for flag, name in SUBSYSTEM_FLAGS.items() if name == block}
+    return [
+        gap for gap in gaps
+        if gap.gap_type is GapType.SUBSYSTEM_OFFLINE
+        and gap.detail.split("=", 1)[0] in flags
+    ]
 
 
 def empty_record_gaps(record: Record) -> list[Gap]:

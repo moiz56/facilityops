@@ -345,3 +345,78 @@ code {
 /* 2.4's third severity. Distinct from .badge-other, which is what an
  * unlisted value renders as. */
 .badge-info { color: #33506b; }
+
+/* --- the zone telemetry summary ----------------------------------------- */
+/*
+ * 3.4's table. Min, mean and max each get a column, grouped under the
+ * measurement they belong to, so a reader can follow one figure down the page.
+ * A run can carry any number of zones, so the header repeats on each page and
+ * no row splits across a break (.data-table above sets both).
+ */
+
+.zone-table {
+  table-layout: fixed;
+  font-size: 8pt;
+}
+
+/* The name column holds a checkpoint-length zone id without breaking it
+ * mid-word, and the count columns hold their own headers. What is left is
+ * split evenly across the nine figures. */
+.zone-table col.zone-name   { width: 20%; }
+.zone-table col.zone-count  { width: 10%; }
+.zone-table col.zone-figure { width: 7%; }
+
+/* Twelve columns cannot afford the tracking the other tables' headers carry. */
+.zone-table thead th { letter-spacing: 0.03em; }
+
+/* Room to breathe: twelve columns of figures read as a wall without it. */
+.zone-table th,
+.zone-table td {
+  padding-top: 5pt;
+  padding-bottom: 5pt;
+}
+
+.zone-table .figure { padding-right: 4pt; }
+
+/* A light rule where one measurement ends and the next begins, so the three
+ * figures of a group read together without the group needing a box. */
+.zone-group {
+  border-left: 0.4pt solid #e0e0e0;
+  padding-left: 6pt;
+}
+
+/* The measurement name, centred over the three figures it covers. */
+.zone-measure {
+  text-align: center;
+  border-bottom: none;
+  padding-bottom: 1pt;
+}
+
+/* The second header line names the three figures. The rule goes under the
+ * pair, not between them: the two rows are one heading. */
+.zone-subhead {
+  border-bottom: 1pt solid var(--primary-colour);
+  font-size: 6.5pt;
+  letter-spacing: 0.04em;
+  color: #777;
+  padding-top: 1pt;
+}
+
+/* A unit is written as it is recorded. Uppercasing the header turned the g of
+ * vibration RMS into a G, which is a different thing. */
+.zone-table .unit { text-transform: none; }
+
+/* What a measurement says instead of figures, across the three columns it
+ * would have filled. */
+.zone-absent {
+  text-align: center;
+  font-size: 7.5pt;
+}
+
+/* How many samples actually carried the value, where that is not all of them. */
+.zone-used {
+  display: block;
+  font-size: 6pt;
+  color: #777;
+  white-space: nowrap;
+}

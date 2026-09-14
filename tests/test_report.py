@@ -19,17 +19,20 @@ from common.paths import (
 from report.cli import dump_artifacts, run_pipeline, write_json
 from common.schema import (
     Accelerometer, Checkpoint, Environment, Event, Finding, Particulate, RawSensor,
-    Point2D, Pose, Record, SensorBlock, SensorWarning,
+    Point2D, Pose, Record, SampleSensor, SensorAlert, SensorBlock, SensorSample,
+    SensorWarning,
 )
-from report.derive import computed_counts, declared_counts, derive_report_values
+from report.derive import ZoneStat, computed_counts, declared_counts, derive_report_values
 from report.render import (
-    FindingGroup, count_rows, finding_groups, place, render_html, severity_style,
+    FindingGroup, count_rows, device_name, finding_groups, measure, place,
+    render_html, severity_style, zone_absence,
 )
 from report.manifest import (
     PLACEHOLDER_FIELDS, build_manifest, config_hash, write_manifest,
 )
 from report.gaps import (
     RUN_LEVEL, Gap, GapType, checkpoint_gaps, disagreeing_counts, missed_checkpoint_gaps,
+    offline_block_gaps,
     missing_image_gaps, missing_thermal_gaps, no_evidence_gaps,
     count_mismatch_gaps, detect_gaps, empty_record_gaps, no_findings_gaps,
     sensor_unavailable_gaps, stale_reading_gaps, subsystem_offline_gaps,
@@ -1212,3 +1215,167 @@ def test_reference_run_renders_its_one_finding() -> None:
     assert "1 finding recorded for this run." in html
     for one in record.findings:
         assert one.finding_id in html
+
+
+# --- the zone telemetry summary (3.4) --------------------------------------
+#
+# derive.py works the figures out; these cover what the section does with them.
+# A cell with no number has to say which of three things happened, and a
+# measurement the table leaves out because its device was off has to be
+# accounted for on the page as well as in the manifest (4.4).
+
+
+def sample(zone: str | None, temperature: float | None = 20.0,
+           vibration: float | None = 0.5) -> SensorSample:
+    """One telemetry sample in a zone."""
+    return SensorSample(
+        zone=zone,
+        sensor=SampleSensor(
+            environment=Environment(temperature_c=temperature, humidity_pct=40.0),
+            accelerometer=Accelerometer(vibration_rms_g=vibration),
+        ),
+    )
+
+
+def telemetry_record(**overrides) -> Record:
+    """A run with one checkpoint and whatever telemetry the test supplies."""
+    point = checkpoint(sensor_block(), checkpoint_id="checkpoint_1")
+    return run_record(checkpoints=(point,), **overrides)
+
+
+@pytest.mark.parametrize("value, expected", [
+    (29.725490196, "29.73"),      # a mean, rounded to four significant figures
+    (0.62315294, "0.6232"),       # the same four figures at a different magnitude
+    (0.042, "0.042"),             # a recorded value, unchanged
+    (30.0, "30"),                 # no trailing zeros invented
+    (0.00005, "0.00005"),         # never 5e-05
+    (12345.678, "12345.678"),     # never 1.235e+04
+    (0.0, "0"),
+    (None, None),
+])
+def test_measure(value: float | None, expected: str | None) -> None:
+    """Significant figures, so one rule reads well at any magnitude, and no exponents."""
+    assert measure(value) == expected
+
+
+def test_device_name() -> None:
+    """TA-09 wants the device named, and the flag is where its name is recorded."""
+    assert device_name("sps30_ok") == "sps30"
+    assert device_name("adxl345_ok") == "adxl345"
+
+
+def test_zone_absence_names_the_offline_device() -> None:
+    assert zone_absence(ZoneStat(suppressed_by="adxl345_ok"), 10) == \
+        "Not recorded - adxl345 offline"
+
+
+def test_zone_absence_tells_no_samples_from_no_value() -> None:
+    """Two different absences. A blank that could be either says neither."""
+    assert zone_absence(ZoneStat(), 0) == "No samples"
+    assert zone_absence(ZoneStat(), 10) == "Not recorded"
+
+
+def test_offline_block_gaps_picks_only_that_block() -> None:
+    point = checkpoint(sensor_block(raw={"sps30_ok": False, "adxl345_ok": False}))
+    gaps = subsystem_offline_gaps(point)
+
+    assert len(gaps) == 2
+    assert [gap.detail for gap in offline_block_gaps(gaps, "particulate")] == \
+        ["sps30_ok=false; particulate block not recorded"]
+    assert [gap.detail for gap in offline_block_gaps(gaps, "accelerometer")] == \
+        ["adxl345_ok=false; accelerometer block not recorded"]
+    assert offline_block_gaps(gaps, "environment") == []
+
+
+def test_offline_block_gaps_ignores_other_gap_types() -> None:
+    gaps = [Gap("checkpoint_1", GapType.NO_EVIDENCE, "sps30_ok=false; whatever")]
+    assert offline_block_gaps(gaps, "particulate") == []
+
+
+# --- the zone telemetry summary, rendered ----------------------------------
+
+
+def test_zone_row_renders_its_range() -> None:
+    record = telemetry_record(sensor_samples=(
+        sample("checkpoint_1", temperature=20.0),
+        sample("checkpoint_1", temperature=22.0),
+    ))
+    html = render_record(record)
+
+    assert "Zone telemetry" in html
+    # Min, mean and max, each in its own cell so they line up down the page.
+    for figure in ("20", "21", "22"):
+        assert f'>{figure}</td>' in html
+
+
+def test_a_zone_with_no_samples_says_so() -> None:
+    html = render_record(telemetry_record(sensor_samples=()))
+    assert "No samples" in html
+
+
+def test_an_unzoned_sample_keeps_its_row() -> None:
+    """11: an optional field absent is still supported. The telemetry is not lost."""
+    record = telemetry_record(sensor_samples=(sample(None, temperature=15.0),))
+    html = render_record(record)
+
+    assert "No zone recorded" in html
+    assert html.count(">15</td>") == 3       # min, mean and max of the one sample
+
+
+def test_a_suppressed_measurement_names_the_device() -> None:
+    """TA-11: a checkpoint reporting adxl345 offline keeps vibration out of the rollup."""
+    point = checkpoint(sensor_block(raw={"adxl345_ok": False}), checkpoint_id="checkpoint_1")
+    record = run_record(
+        checkpoints=(point,),
+        sensor_samples=(sample("checkpoint_1", vibration=0.5),),
+    )
+    html = render_record(record)
+
+    assert "Not recorded - adxl345 offline" in html
+
+
+def test_particulate_note_appears_when_the_device_was_off() -> None:
+    """4.4: a gap in the manifest has to be visible in the PDF."""
+    point = checkpoint(sensor_block(raw={"sps30_ok": False}), checkpoint_id="checkpoint_1")
+    record = run_record(checkpoints=(point,))
+    html = render_html(
+        record, subsystem_offline_gaps(point), derive_report_values(record), {},
+        load_config(CONFIG_PATH),
+    )
+
+    assert "Particulate is not summarised here." in html
+    assert "1 checkpoint," in html
+
+
+def test_no_particulate_note_when_the_device_was_healthy() -> None:
+    """No gap, nothing to account for, nothing said."""
+    html = render_record(telemetry_record())
+    assert "Particulate is not summarised here." not in html
+
+
+def test_a_run_with_no_zones_says_so() -> None:
+    html = render_record(run_record(checkpoints=()))
+    assert "No telemetry was recorded for this run." in html
+
+
+def test_alerts_are_counted_against_the_zone_that_names_them() -> None:
+    """3.4: Alerts is the count of sensor_alerts whose zone matches."""
+    record = telemetry_record(sensor_alerts=(
+        SensorAlert(code="vibration_high", severity="critical", zone="checkpoint_1"),
+        SensorAlert(code="temperature_high", severity="warning", zone="checkpoint_1"),
+    ))
+    rows = derive_report_values(record).zones
+
+    assert next(row for row in rows if row.zone == "checkpoint_1").alerts == 2
+
+
+def test_every_alert_lands_in_exactly_one_zone_row() -> None:
+    """A zone only an alert mentions still gets a row, so none is lost."""
+    record = telemetry_record(sensor_alerts=(
+        SensorAlert(code="a", severity="warning", zone="checkpoint_1"),
+        SensorAlert(code="b", severity="warning", zone="somewhere_else"),
+        SensorAlert(code="c", severity="critical", zone=None),
+    ))
+    rows = derive_report_values(record).zones
+
+    assert sum(row.alerts for row in rows) == len(record.sensor_alerts)

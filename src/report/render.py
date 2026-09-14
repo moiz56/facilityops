@@ -32,8 +32,8 @@ from common import OUTPUT_DIR, PROJECT_ROOT
 from common.paths import setting
 from common.provenance import Provenance, stamp
 from common.schema import Finding, Point2D, Pose, Record
-from report.derive import DerivedValues
-from report.gaps import RUN_LEVEL, Gap, GapType, disagreeing_counts
+from report.derive import DerivedValues, ZoneStat
+from report.gaps import RUN_LEVEL, Gap, GapType, disagreeing_counts, offline_block_gaps
 from report.images import DirectionCell
 
 logger = logging.getLogger("report.render")
@@ -46,6 +46,7 @@ __all__ = [
     "VERDICT_STYLES", "verdict_style",
     "SEVERITY_STYLES", "severity_style", "place",
     "CONFIRMED_STATUSES", "REVIEW_STATUS", "FindingGroup", "finding_groups",
+    "ZONE_COLUMNS", "measure", "device_name", "zone_absence",
     "provenance_line", "logo_uri", "css_string", "runtime_css",
     "render_html", "render_pdf",
 ]
@@ -119,6 +120,8 @@ def environment() -> Environment:
     env.filters["show"] = show
     env.filters["moment"] = moment
     env.filters["place"] = place
+    env.filters["measure"] = measure
+    env.filters["zone_absence"] = zone_absence
     env.filters["severity_style"] = severity_style
     return env
 
@@ -332,6 +335,79 @@ def finding_groups(findings: Sequence[Finding]) -> list[FindingGroup]:
     ]
 
 
+# --- the zone telemetry summary (3.4) ----------------------------------------
+#
+# One row per zone: the sample count, the min, mean and max of three
+# measurements, and how many alerts named the zone. derive.py has worked all of
+# it out; nothing here counts anything.
+#
+# There is no particulate column, per decision 33. Where the device that would
+# have filled one was off, that is a SUBSYSTEM_OFFLINE gap detect_gaps already
+# raised, and the section says so - 4.4 requires every manifest gap to be
+# visible in the PDF, and a rollup that drops a measurement without a word is
+# the silent handling 3.6 rules out.
+
+#: The three measurements 2.6 names and 3.4's table draws, with the unit each
+#: is recorded in. A template loops over these rather than repeating nine
+#: near-identical expressions.
+ZONE_COLUMNS = (
+    ("temperature_c", "Temp", "\u00b0C"),
+    ("humidity_pct", "Humidity", "%"),
+    ("vibration_rms_g", "Vibration RMS", "g"),
+)
+
+
+def measure(value: float | None, figures: int = 4) -> str | None:
+    """One measurement, rounded for print and never in exponent form.
+
+    Significant figures rather than a fixed number of decimal places: a zone's
+    vibration sitting near 0.05 and its temperature near 30 need different
+    decimals to read the same way, and the engine cannot know in advance what
+    range a record will carry.
+
+    derive.py leaves a mean unrounded on purpose, so the rounding happens here,
+    once, where every other formatting decision lives. A value extreme enough
+    that %g would reach for an exponent is written out in full instead: 5e-05
+    is not a figure to put in front of a facility manager.
+    """
+    if value is None:
+        return None
+    text = f"{value:.{figures}g}"
+    if "e" in text:
+        text = f"{value:.10f}".rstrip("0").rstrip(".")
+    return text
+
+
+def device_name(flag: str) -> str:
+    """The device a raw sensor flag is named after: adxl345_ok -> adxl345.
+
+    TA-09 wants the block that was suppressed to name the device rather than
+    say "a sensor", and the flag is where 5.7's config records that name.
+    """
+    return flag.removesuffix("_ok")
+
+
+def zone_absence(stat: ZoneStat, samples: int) -> str:
+    """Why one zone statistic has no numbers.
+
+    Three different things leave the cell without a figure, and a reader has to
+    be able to tell them apart - a blank that could mean any of the three is
+    the confident wrong answer 0 rules out:
+
+    - the device was off, so nothing it wrote is a measurement (TA-09 to TA-11)
+    - the zone recorded no telemetry at all
+    - telemetry was recorded, but none of it carried this value
+
+    Which applies is read off what derive.py already worked out. Nothing is
+    decided a second time here.
+    """
+    if stat.suppressed_by is not None:
+        return f"Not recorded - {device_name(stat.suppressed_by)} offline"
+    if samples == 0:
+        return "No samples"
+    return "Not recorded"
+
+
 # --- config and provenance ---------------------------------------------------
 
 
@@ -435,6 +511,11 @@ def render_html(
         # of the findings section and the coverage page are one figure and not
         # two comparisons that happen to agree (5.4).
         findings_row=next(row for row in rows if row.name == "findings"),
+        zone_columns=ZONE_COLUMNS,
+        # Which measurement the zone table leaves out, and why, comes from the
+        # gaps already detected rather than from a template testing a device
+        # flag for itself (5.5).
+        particulate_offline=offline_block_gaps(gaps, "particulate"),
     )
 
 
