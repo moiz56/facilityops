@@ -178,6 +178,18 @@
 
 89. The table carries no total row. 3.4 specifies one row per zone and nothing else, and a total is a figure nobody asked for (10). Every alert is counted in exactly one row by construction - `zone_order` gives a row to any zone an alert names - so the column reconciles with the alerts section without a total saying so.
 
+90. The alerts summary groups by severity and orders each group by time. 3.1 asks for the alerts "grouped by severity" and 3.5 asks for them "sorted by timestamp"; a single flat table cannot do both. Grouping into blocks and sorting inside each one satisfies both lines as written, so neither has to be read as overriding the other. Raised as question 25.
+
+91. Criticals read first, then warnings, then any severity 2.5 does not list, in the order the tally sorted them. 2.5 calls the set open and 11 forbids mapping an unlisted value onto a known one, so an unfamiliar severity gets a block of its own under its own name rather than being folded into warning.
+
+92. `critical` shares the `fail` badge colour. 3.5 wants criticals visually distinguished and styles.css already carries a red for the worst state; adding a fourth colour for a fourth word would say nothing the existing one does not. Only the colour is shared - the severity still prints exactly as recorded, so this is a presentation choice and not the enum mapping 11 rules out.
+
+93. The alerts table draws the five things 3.5 names - severity, label, description, time and nearest checkpoint - and nothing else. `zone` and `coordinates` are on every alert and neither is asked for; a column nobody requested is an unrequested feature (10). The alert's `code` sits under its label rather than in a column of its own, because 2.5 keeps the code set open and a reader needs the machine value to match an alert against the sensor hub's own logs.
+
+94. The section says in words that the checkpoint named in each row is a position and not a cause, above the table rather than as a footnote. 2.5 is explicit that `nearest_checkpoint_id` is proximity and not attribution, and a column heading reading "Nearest checkpoint" is the whole warning only to a reader who already knows the distinction. The sentence comes before the rows it qualifies.
+
+95. An alert with no timestamp sorts to the end of its block rather than failing the sort. 2.5 marks the field required, so this is a record that does not match section 2, and 11 asks for one to be handled defensively rather than to crash.
+
 # Questions to raise
 
 1. branding.yaml is a standalone file but the config.yaml in the document contains a branding section, for now I have put both in the config.yaml making branding.yaml empty but is this the way to go
@@ -225,3 +237,5 @@
 23. 3.1 lists what the PDF contains, in order, and the zone telemetry summary of 3.4 is not among the seven items. 4.2's example manifest does not list a `zone_telemetry` section either. But 5.7's config has a `zone_telemetry` flag, 5.1's layout has `_zone.html.j2`, and the config's own key order places it between the alerts summary and the checkpoint sections - which is where the engine now renders it. Is that the intended position, and should the manifest's `sections` array carry an entry for it when it is enabled? 4.4 only says to omit the entry for a section that is disabled.
 
 24. 3.4 says "Particulate is excluded from this table entirely while `sps30_ok` is false". Decision 33 reads that as saying where the exclusion lives rather than as authorising a fourth column that appears when the flag is true, because 3.4's own table draws six columns with no particulate among them and 2.6 states flatly that the report shows "the min/mean/max of temperature, humidity and vibration RMS" per zone. The word "while" is the only thing pointing the other way. Confirming the reading would be useful: if a particulate column is wanted when the device is healthy, it is a small change, but it is not what is built.
+
+25. 3.1 and 3.5 describe the alerts summary differently: 3.1 says "all alerts, grouped by severity" and 3.5 says "all sensor_alerts, sorted by timestamp". One table cannot be both. Decision 90 reads them as compatible - blocks by severity, time order inside each block - which is what is built, and which also gives 3.5's "criticals visually distinguished" somewhere to live. If a single flat table in time order was meant, with the severity showing only as a badge in each row, that is a small change, but it is not what is built.

@@ -1,0 +1,70 @@
+{# Sensor alerts summary - 3.5.
+
+   Every alert the run logged, grouped by severity with the worst first, and
+   ordered by time inside each group. A count of each severity heads the
+   section. Which alert belongs to which block, and in what order, is
+   alert_groups' answer rather than a test made here (5.4).
+
+   2.5 is firm about one thing: nearest_checkpoint_id is spatial proximity and
+   not attribution. The column says "Nearest checkpoint" and the section says
+   what that means, so no reader takes an alert near a checkpoint for an alert
+   caused by one.
+
+   label and description are free text. Autoescaping is on, so a field holding
+   <script> or {{ '{{ config }}' }} renders as written (5.5). #}
+<section class="section alerts">
+
+  <h2>Sensor alerts</h2>
+
+  {% if alert_groups %}
+
+    <p class="alerts-count">
+      {% for severity, total in derived.alerts_by_severity.items() %}
+        <span class="alerts-tally">
+          <span class="badge badge-small badge-{{ severity | severity_style }}">{{ severity }}</span>
+          <span class="alerts-total">{{ total }}</span>
+        </span>
+      {% endfor %}
+    </p>
+
+    <p class="lede">
+      Threshold breaches logged during the run, independently of the
+      checkpoints. The checkpoint named in each row is the one nearest to where
+      the alert was recorded. It is a position, not a cause.
+    </p>
+
+    {% for group in alert_groups %}
+
+      <h3>{{ group.severity }} ({{ group.alerts | length }})</h3>
+
+      <table class="data-table alerts-table alerts-{{ group.severity | severity_style }}">
+        <thead>
+          <tr>
+            <th>Recorded</th>
+            <th>Alert</th>
+            <th>Description</th>
+            <th>Nearest checkpoint</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for alert in group.alerts %}
+            <tr>
+              <td>{{ alert.timestamp | moment }}</td>
+              <td>
+                {{ alert.label | show }}
+                <span class="alert-code">{{ alert.code }}</span>
+              </td>
+              <td>{{ alert.description | show }}</td>
+              <td>{{ (alert.nearest_checkpoint_name or alert.nearest_checkpoint_id) | show }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+    {% endfor %}
+
+  {% else %}
+    <p class="absent-note">No sensor alerts were recorded for this run.</p>
+  {% endif %}
+
+</section>

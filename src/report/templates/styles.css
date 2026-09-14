@@ -346,6 +346,59 @@ code {
  * unlisted value renders as. */
 .badge-info { color: #33506b; }
 
+/* --- the sensor alerts summary ------------------------------------------ */
+/*
+ * 3.5 wants criticals told apart. The badge at the head of each block already
+ * carries the colour; the rule down the left of the critical table repeats it
+ * for the rows, so a reader scanning the page sees which block is which
+ * without reading a word. Colour only ever repeats what the words say.
+ */
+
+.alerts-table { font-size: 8pt; }
+
+/* The rule marking a critical block stands clear of the text it marks: the
+ * leading cell is indented to make room rather than printing against it. Only
+ * that cell carries the rule, and the header is indented to match so the
+ * column still lines up under its own heading. */
+.alerts-fail td { border-left: 2pt solid #9b1c1c; padding-left: 5pt; }
+.alerts-fail td + td { border-left: none; padding-left: 0; }
+.alerts-fail thead th:first-child { padding-left: 5pt; }
+
+/* The severity tallies at the head of the section (3.5). A badge and its count
+ * read as one unit, so the gap between two tallies is wider than the gap
+ * inside one. */
+.alerts-count { margin: 0 0 5mm; }
+
+.alerts-tally {
+  display: inline-block;
+  margin-right: 11mm;
+  white-space: nowrap;
+}
+
+.alerts-tally .badge-small { margin-right: 3pt; }
+
+.alerts-total {
+  font-weight: bold;
+  font-size: 10pt;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The machine code beside an alert's label. 2.5 keeps the set open, so the
+ * code is printed as recorded rather than translated. It sits on a tight line
+ * under the label rather than a full one, so a run with twenty alerts still
+ * reads as a list instead of as twenty blocks. */
+.alert-code {
+  display: block;
+  font-size: 7pt;
+  line-height: 1.2;
+  color: #666;
+}
+
+/* A block heading belongs to the table under it, so it sits nearer that than
+ * the block it follows. The first one needs no gap: the lede is above it. */
+.alerts h3 { margin: 9mm 0 2.5mm; }
+.alerts h3:first-of-type { margin-top: 0; }
+
 /* --- the zone telemetry summary ----------------------------------------- */
 /*
  * 3.4's table. Min, mean and max each get a column, grouped under the

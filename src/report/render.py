@@ -31,7 +31,7 @@ from weasyprint import CSS, HTML
 from common import OUTPUT_DIR, PROJECT_ROOT
 from common.paths import setting
 from common.provenance import Provenance, stamp
-from common.schema import Finding, Point2D, Pose, Record
+from common.schema import Finding, Point2D, Pose, Record, SensorAlert
 from report.derive import DerivedValues, ZoneStat
 from report.gaps import RUN_LEVEL, Gap, GapType, disagreeing_counts, offline_block_gaps
 from report.images import DirectionCell
@@ -46,6 +46,7 @@ __all__ = [
     "VERDICT_STYLES", "verdict_style",
     "SEVERITY_STYLES", "severity_style", "place",
     "CONFIRMED_STATUSES", "REVIEW_STATUS", "FindingGroup", "finding_groups",
+    "ALERT_SEVERITIES", "AlertGroup", "alert_groups",
     "ZONE_COLUMNS", "measure", "device_name", "zone_absence",
     "provenance_line", "logo_uri", "css_string", "runtime_css",
     "render_html", "render_pdf",
@@ -261,13 +262,18 @@ CONFIRMED_STATUSES = ("logged", "acknowledged")
 REVIEW_STATUS = "abstained"
 
 #: Severity -> badge style. 2.4 lists info, warning and fail, lowercase and
-#: unlike the status values elsewhere. A severity nobody listed renders as
-#: written in the neutral style, for the same reason verdict_style does (11).
-SEVERITY_STYLES = {"fail": "fail", "warning": "warn", "info": "info"}
+#: unlike the status values elsewhere. 2.5 adds critical, which alerts use and
+#: findings do not; it shares the fail colour because 3.5 wants criticals told
+#: apart at a glance. Only the colour is shared - the word still prints as
+#: recorded. A severity nobody listed renders as written in the neutral style,
+#: for the same reason verdict_style does (11).
+SEVERITY_STYLES = {
+    "fail": "fail", "warning": "warn", "info": "info", "critical": "fail",
+}
 
 
 def severity_style(severity: str) -> str:
-    """The badge style for a finding's severity, or the neutral one."""
+    """The badge style for a finding's or an alert's severity, or the neutral one."""
     return SEVERITY_STYLES.get(severity, "other")
 
 
@@ -332,6 +338,53 @@ def finding_groups(findings: Sequence[Finding]) -> list[FindingGroup]:
             ),
             findings=tuple(f for f in findings if f.status not in listed),
         ),
+    ]
+
+
+# --- the sensor alerts summary (3.5) -----------------------------------------
+#
+# 3.1 asks for the alerts grouped by severity; 3.5 asks for them sorted by
+# timestamp, with a count of each severity at the head. Grouping by severity
+# and ordering each group by time satisfies both, so neither line has to be
+# read as overriding the other (decision 90).
+
+
+#: Severity order for the alert blocks. 2.5 names critical and warning, and the
+#: worst reads first. The set is open, so anything else follows these in the
+#: order alert_counts sorted it into, never folded into a severity it is not.
+ALERT_SEVERITIES = ("critical", "warning")
+
+
+@dataclass(frozen=True)
+class AlertGroup:
+    """One severity's block of the alerts summary, oldest alert first."""
+
+    severity: str
+    alerts: tuple[SensorAlert, ...]
+
+
+def alert_groups(alerts: Sequence[SensorAlert], counted: dict[str, int]) -> list[AlertGroup]:
+    """Every alert, split by severity and ordered by time within each block.
+
+    `counted` is derive.py's tally, so the severities that get a block and the
+    figures printed at the head of the section come from one place and cannot
+    disagree.
+
+    An alert with no timestamp sorts last rather than failing the comparison:
+    2.5 marks the field required, and 11 asks for a record that does not match
+    section 2 to be handled rather than to crash.
+    """
+    ordered = [s for s in ALERT_SEVERITIES if s in counted]
+    ordered += [s for s in counted if s not in ALERT_SEVERITIES]
+    return [
+        AlertGroup(
+            severity=severity,
+            alerts=tuple(sorted(
+                (a for a in alerts if a.severity == severity),
+                key=lambda a: (a.timestamp is None, a.timestamp or datetime.min),
+            )),
+        )
+        for severity in ordered
     ]
 
 
@@ -507,6 +560,10 @@ def render_html(
         no_evidence=coverage_items(record, gaps, GapType.NO_EVIDENCE),
         verdict_style=verdict_style(record.final_status),
         finding_groups=finding_groups(record.findings),
+        # 3.1 groups the alerts by severity and 3.5 orders them by time; one
+        # function settles both, and reads its severities from the tally the
+        # manifest prints so the two cannot disagree (4.2).
+        alert_groups=alert_groups(record.sensor_alerts, derived.alerts_by_severity),
         # The Findings row of the reconciliation table, so the count at the head
         # of the findings section and the coverage page are one figure and not
         # two comparisons that happen to agree (5.4).
