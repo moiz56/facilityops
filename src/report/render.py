@@ -20,6 +20,7 @@ settled in one place.
 from __future__ import annotations
 
 import logging
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -29,12 +30,14 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from weasyprint import CSS, HTML
 
 from common import OUTPUT_DIR, PROJECT_ROOT
-from common.paths import setting
+from common.paths import ResolvedImage, setting
 from common.provenance import Provenance, stamp
-from common.schema import Finding, Point2D, Pose, Record, SensorAlert
+from common.schema import (
+    Checkpoint, Finding, Point2D, Pose, Record, SensorAlert, SensorBlock, SensorWarning,
+)
 from report.derive import DerivedValues, ZoneStat
 from report.gaps import RUN_LEVEL, Gap, GapType, disagreeing_counts, offline_block_gaps
-from report.images import DirectionCell
+from report.images import GRID_COLUMNS, DirectionCell, prepare_image
 
 logger = logging.getLogger("report.render")
 
@@ -43,10 +46,14 @@ __all__ = [
     "environment", "show", "moment", "sections",
     "CountRow", "count_rows", "CoverageItem", "coverage_items",
     "run_count_conflicts",
-    "VERDICT_STYLES", "verdict_style",
+    "VERDICT_STYLES", "verdict_style", "STATUS_STYLES", "status_style",
     "SEVERITY_STYLES", "severity_style", "place",
     "CONFIRMED_STATUSES", "REVIEW_STATUS", "FindingGroup", "finding_groups",
     "ALERT_SEVERITIES", "AlertGroup", "alert_groups",
+    "EvidenceCell", "image_absence", "image_source", "evidence_cells",
+    "SENSOR_BLOCKS", "SensorBlockView", "SensorView", "reading",
+    "sensor_block_view", "sensor_view",
+    "CheckpointView", "checkpoint_views", "ZoneGroup", "zone_groups",
     "ZONE_COLUMNS", "measure", "device_name", "zone_absence",
     "provenance_line", "logo_uri", "css_string", "runtime_css",
     "render_html", "render_pdf",
@@ -124,6 +131,8 @@ def environment() -> Environment:
     env.filters["measure"] = measure
     env.filters["zone_absence"] = zone_absence
     env.filters["severity_style"] = severity_style
+    env.filters["verdict_style"] = verdict_style
+    env.filters["status_style"] = status_style
     return env
 
 
@@ -186,6 +195,18 @@ VERDICT_STYLES = {"PASS": "pass", "FAIL": "fail", "WARN": "warn"}
 def verdict_style(final_status: str) -> str:
     """The badge style for a verdict, or the neutral one for an unlisted value."""
     return VERDICT_STYLES.get(final_status, "other")
+
+
+#: Status -> badge style. 2.2 lists COMPLETED and MISSED. This is the same kind
+#: of choice as the verdict styles above: the word still prints as recorded and
+#: only the colour is shared, so a status nobody listed is neutral rather than
+#: dressed as one of these two.
+STATUS_STYLES = {"COMPLETED": "pass", "MISSED": "fail"}
+
+
+def status_style(status: str) -> str:
+    """The badge style for whether the robot got there, or the neutral one."""
+    return STATUS_STYLES.get(status, "other")
 
 
 # --- what sits under the reconciliation table (3.3) --------------------------
@@ -388,6 +409,297 @@ def alert_groups(alerts: Sequence[SensorAlert], counted: dict[str, int]) -> list
     ]
 
 
+# --- the per-checkpoint section (3.2) ----------------------------------------
+#
+# Three pieces, kept apart because they answer different questions: what the
+# evidence grid draws, what the sensor table says, and what the block as a
+# whole is made of.
+#
+# Not one of them tests a device flag, a file or a count. detect_gaps has
+# already decided all of that (5.4), and every absence printed here is read
+# back off a gap it raised, which is what keeps 4.4's two directions true: the
+# manifest and the page cannot disagree, because they are the same list.
+
+
+# --- the evidence grid -------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EvidenceCell:
+    """One cell of the rendered grid: a picture to draw, or words to print.
+
+    Each modality has a source or an absence, never both and never neither.
+    3.2 gives every direction a cell whether or not an image exists, so the
+    grid keeps its shape and a missing direction does not shift the others.
+    """
+
+    direction: str
+    rgb_src: str | None
+    rgb_absent: str | None
+    thermal_src: str | None
+    thermal_absent: str | None
+
+
+def image_absence(image: ResolvedImage | None, uncaptured: str, unusable: str) -> str | None:
+    """What a cell says in place of a picture, or None when it has one to show.
+
+    3.6 asks for three situations to read differently: nothing was captured for
+    that direction, a path was recorded and does not resolve, and a file is
+    there but empty or undecodable. The first is this cell's own wording; the
+    other two carry the reason resolution already worked out, which is the same
+    reason the MISSING_IMAGE gap carries.
+    """
+    if image is None:
+        return uncaptured
+    if not image.readable:
+        return f"{unusable} - {image.reason}"
+    return None
+
+
+def image_source(image: ResolvedImage | None, image_dir: Path | None) -> str | None:
+    """A URI for the file to embed, or None when there is nothing to embed.
+
+    Sizing the file down happens in images.py, per 5.5.
+    """
+    path = prepare_image(image, image_dir) if image is not None else None
+    return path.resolve().as_uri() if path is not None else None
+
+
+def evidence_cells(
+    grid: Sequence[DirectionCell], image_dir: Path | None
+) -> tuple[EvidenceCell, ...]:
+    """The eight cells of one checkpoint's grid, ready to draw."""
+    return tuple(
+        EvidenceCell(
+            direction=cell.direction,
+            rgb_src=image_source(cell.rgb, image_dir),
+            rgb_absent=image_absence(cell.rgb, "Image not captured", "Image not available"),
+            thermal_src=image_source(cell.thermal, image_dir),
+            thermal_absent=image_absence(cell.thermal, "No thermal", "Thermal not available"),
+        )
+        for cell in grid
+    )
+
+
+# --- the sensor table --------------------------------------------------------
+
+#: The three measurement blocks 3.2 draws, in the order it names them, with the
+#: fields each carries and the unit each was recorded in. The keys are the block
+#: names 5.7's subsystem_flags maps its device flags onto, so the table and the
+#: trust rule cannot be talking about different blocks.
+SENSOR_BLOCKS = (
+    ("environment", "Environment", (
+        ("temperature_c", "Temperature", "°C"),
+        ("humidity_pct", "Humidity", "%"),
+        ("pressure_hpa", "Pressure", "hPa"),
+    )),
+    ("accelerometer", "Accelerometer", (
+        ("accel_x", "Acceleration X", "m/s²"),
+        ("accel_y", "Acceleration Y", "m/s²"),
+        ("accel_z", "Acceleration Z", "m/s²"),
+        ("vibration_peak", "Vibration peak", "g"),
+        ("vibration_rms_g", "Vibration RMS", "g"),
+    )),
+    ("particulate", "Particulate", (
+        ("pm1_0", "PM1.0", "µg/m³"),
+        ("pm2_5", "PM2.5", "µg/m³"),
+        ("pm4_0", "PM4.0", "µg/m³"),
+        ("pm10", "PM10", "µg/m³"),
+    )),
+)
+
+
+@dataclass(frozen=True)
+class SensorBlockView:
+    """One measurement block: its readings, or the words that replace them.
+
+    `absent` and `rows` are exclusive. When a device flag said the block is not
+    a measurement, there are no rows at all - the numbers are not read, not
+    formatted and not hidden behind a style. Nothing downstream can print them
+    because nothing downstream is given them (TA-09, TA-10, TA-11).
+    """
+
+    name: str
+    absent: str | None
+    rows: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class SensorView:
+    """A checkpoint's whole sensor table.
+
+    `unavailable` set means the reading is disqualified entirely and there are
+    no blocks: 3.6 has the table read "Sensor unavailable" rather than listing
+    three blocks that each say the same thing.
+
+    `stale` set means the values still render, flagged with their age (2.8).
+    """
+
+    unavailable: str | None
+    stale: str | None
+    blocks: tuple[SensorBlockView, ...]
+    warnings: tuple[SensorWarning, ...]
+
+
+def reading(value: float | None, unit: str) -> str:
+    """One measurement with its unit, or the words that say none was recorded."""
+    if value is None:
+        return "Not recorded"
+    return f"{measure(value)} {unit}"
+
+
+def sensor_block_view(
+    sensor: SensorBlock, gaps: Sequence[Gap], key: str, name: str,
+    fields: Sequence[tuple[str, str, str]],
+) -> SensorBlockView:
+    """One block of the sensor table, from the gaps already raised for it.
+
+    Whether the device was working is not asked here. offline_block_gaps is the
+    question put to detect_gaps' answer, and the flag is read back off the gap
+    so the sentence names the same device the manifest does (TA-09).
+    """
+    offline = offline_block_gaps(gaps, key)
+    if offline:
+        flag = offline[0].detail.split("=", 1)[0]
+        return SensorBlockView(
+            name=name, absent=f"Not recorded - {device_name(flag)} offline", rows=(),
+        )
+
+    block = getattr(sensor, key, None)
+    if block is None:
+        return SensorBlockView(name=name, absent="Not recorded", rows=())
+
+    return SensorBlockView(
+        name=name,
+        absent=None,
+        rows=tuple(
+            (label, reading(getattr(block, field, None), unit))
+            for field, label, unit in fields
+        ),
+    )
+
+
+def sensor_view(checkpoint: Checkpoint, gaps: Sequence[Gap]) -> SensorView:
+    """One checkpoint's sensor table, built from its own gaps.
+
+    The order matters and is 2.8's: a reading that is disqualified as a whole
+    never reaches the per-block question, which is also why detect_gaps raises
+    no SUBSYSTEM_OFFLINE alongside a SENSOR_UNAVAILABLE (decision 10).
+    """
+    mine = [gap for gap in gaps if gap.item_id == checkpoint.checkpoint_id]
+
+    unavailable = next(
+        (gap.detail for gap in mine if gap.gap_type is GapType.SENSOR_UNAVAILABLE), None,
+    )
+    if unavailable is not None:
+        return SensorView(unavailable=unavailable, stale=None, blocks=(), warnings=())
+
+    # detect_gaps always raises SENSOR_UNAVAILABLE for a checkpoint with no
+    # sensor key at all (TA-14), so this is reached only by a caller that
+    # passed a partial gap list. It says the same thing rather than failing on
+    # the attribute, because a missing reading is exactly what it is.
+    sensor = checkpoint.sensor
+    if sensor is None:
+        return SensorView(
+            unavailable="no sensor reading was recorded", stale=None, blocks=(), warnings=(),
+        )
+
+    return SensorView(
+        unavailable=None,
+        stale=next(
+            (gap.detail for gap in mine if gap.gap_type is GapType.STALE_READING), None,
+        ),
+        blocks=tuple(
+            sensor_block_view(sensor, mine, key, name, fields)
+            for key, name, fields in SENSOR_BLOCKS
+        ),
+        warnings=sensor.warnings,
+    )
+
+
+# --- the block as a whole ----------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CheckpointView:
+    """Everything 3.2 draws for one checkpoint.
+
+    `missed_reason` and `no_evidence` are the details of the gaps that were
+    raised for those two situations, not a second reading of the record. A
+    checkpoint carrying either still renders in full: 3.6 is explicit that
+    neither is a reason to skip the section.
+    """
+
+    checkpoint: Checkpoint
+    cells: tuple[EvidenceCell, ...]
+    sensor: SensorView
+    findings: tuple[Finding, ...]
+    missed_reason: str | None
+    no_evidence: str | None
+
+
+def checkpoint_views(
+    record: Record,
+    grids: dict[str, Sequence[DirectionCell]],
+    gaps: Sequence[Gap],
+    image_dir: Path | None,
+) -> list[CheckpointView]:
+    """One view per checkpoint, in the order the record listed them.
+
+    3.2 renders a run-level finding inside the checkpoint it names as well as
+    in the summary, so the findings here are a second appearance of the same
+    entries and not a different set.
+    """
+    return [
+        CheckpointView(
+            checkpoint=checkpoint,
+            cells=evidence_cells(grids.get(checkpoint.checkpoint_id, ()), image_dir),
+            sensor=sensor_view(checkpoint, gaps),
+            findings=tuple(
+                finding for finding in record.findings
+                if finding.checkpoint_id == checkpoint.checkpoint_id
+            ),
+            missed_reason=checkpoint.missed_reason if any(
+                gap.item_id == checkpoint.checkpoint_id
+                and gap.gap_type is GapType.MISSED_CHECKPOINT
+                for gap in gaps
+            ) else None,
+            no_evidence=next(
+                (
+                    gap.detail for gap in gaps
+                    if gap.item_id == checkpoint.checkpoint_id
+                    and gap.gap_type is GapType.NO_EVIDENCE
+                ),
+                None,
+            ),
+        )
+        for checkpoint in record.checkpoints
+    ]
+
+
+@dataclass(frozen=True)
+class ZoneGroup:
+    """One zone's checkpoints, under the header 3.1 asks for."""
+
+    zone: str
+    checkpoints: tuple[CheckpointView, ...]
+
+
+def zone_groups(views: Sequence[CheckpointView]) -> list[ZoneGroup]:
+    """The checkpoint views grouped by zone, zones in the order they first appear.
+
+    3.1 groups the checkpoint sections by zone with a header per group, and 2.2
+    calls `zone` the grouping key. Record order is kept inside a group rather
+    than sorted: the record lists a route in the order it was driven, and
+    sequence_number is optional, so sorting on it would reorder a run that did
+    not record one.
+    """
+    grouped: dict[str, list[CheckpointView]] = {}
+    for view in views:
+        grouped.setdefault(view.checkpoint.zone, []).append(view)
+    return [ZoneGroup(zone=zone, checkpoints=tuple(group)) for zone, group in grouped.items()]
+
+
 # --- the zone telemetry summary (3.4) ----------------------------------------
 #
 # One row per zone: the sample count, the min, mean and max of three
@@ -535,11 +847,16 @@ def render_html(
     derived: DerivedValues,
     grids: dict[str, list[DirectionCell]],
     config: dict,
+    image_dir: Path | None = None,
 ) -> str:
     """Render the whole report to HTML.
 
     Separate from render_pdf so the markup can be read and tested without
     producing a document.
+
+    `image_dir` is where images.py writes the copies it has sized down (5.5).
+    None means no resizing, which is what an HTML render wants: nothing is
+    embedded, so there is no file size to keep within budget.
     """
     rows = count_rows(derived, disagreeing_counts(record))
     template = environment().get_template("full_report.html.j2")
@@ -573,6 +890,11 @@ def render_html(
         # gaps already detected rather than from a template testing a device
         # flag for itself (5.5).
         particulate_offline=offline_block_gaps(gaps, "particulate"),
+        # Every absence a checkpoint section prints is read back off the gaps
+        # detect_gaps raised, so 4.4's two directions hold by construction
+        # rather than by the page and the manifest agreeing twice over (5.4).
+        checkpoint_zones=zone_groups(checkpoint_views(record, grids, gaps, image_dir)),
+        grid_columns=GRID_COLUMNS,
     )
 
 
@@ -596,7 +918,6 @@ def render_pdf(
     4.1 puts the PDF and the manifest side by side in output/, named from the
     run id exactly as recorded.
     """
-    html = render_html(record, gaps, derived, grids, config)
     footer = provenance_line(
         provenance or stamp(record.run_id, config),
         setting(config, "branding", "footer_text"),
@@ -605,12 +926,17 @@ def render_pdf(
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / f"report_{record.run_id}.pdf"
 
-    HTML(string=html, base_url=str(TEMPLATE_DIR)).write_pdf(
-        path,
-        stylesheets=[
-            CSS(filename=str(STYLES_PATH)),
-            CSS(string=runtime_css(config, footer)),
-        ],
-    )
+    # The sized-down copies live only as long as it takes to embed them. They
+    # are a rendering detail and not an output: 4.1 puts one PDF and one
+    # manifest in output/ and nothing else.
+    with tempfile.TemporaryDirectory(prefix="facilityops-images-") as image_dir:
+        html = render_html(record, gaps, derived, grids, config, Path(image_dir))
+        HTML(string=html, base_url=str(TEMPLATE_DIR)).write_pdf(
+            path,
+            stylesheets=[
+                CSS(filename=str(STYLES_PATH)),
+                CSS(string=runtime_css(config, footer)),
+            ],
+        )
     logger.info("rendered %d checkpoints to %s", len(record.checkpoints), path)
     return path

@@ -77,11 +77,23 @@ p { margin: 0 0 3mm; }
 
 /* --- page breaks (5.5) -------------------------------------------------- */
 
-.checkpoint-block { break-inside: avoid; }
 .detail-table     { break-inside: avoid; }
-.evidence-grid    { break-inside: avoid; }
 .zone-head        { break-after: avoid; }
 img               { break-inside: avoid; }
+
+/* 5.5 lists `.checkpoint-block` and `.evidence-grid` as break-inside: avoid,
+ * and its own next paragraph says a block of sixteen images will not fit one
+ * page and must break between grid rows with a repeated heading. Both cannot
+ * hold at once, and `avoid` is the half that does damage: a block shorter than
+ * a page is pushed whole to the next one, stranding a heading above a blank
+ * page, and a grid that cannot break can never repeat its head on the
+ * continuation the same paragraph asks for.
+ *
+ * So both break freely and the finer rules do the work. TA-06 is what this has
+ * to satisfy, and it asks that no row, heading or grid cell be split - not
+ * that a checkpoint stay whole. Recorded as decision 109. */
+.checkpoint-block { break-inside: auto; }
+.evidence-grid    { break-inside: auto; }
 
 /* Each top-level section starts its own page, so 4.4's section page ranges
  * describe whole pages rather than positions part-way down one. */
@@ -472,4 +484,177 @@ code {
   font-size: 6pt;
   color: #777;
   white-space: nowrap;
+}
+
+
+/* --- the per-checkpoint section (3.2) ----------------------------------- */
+/*
+ * A checkpoint carrying sixteen images does not fit a page, and 5.5 says where
+ * it may break: between rows of the evidence grid, never inside a cell, and
+ * the continuation carries a repeated heading. The grid is a table for exactly
+ * that reason - a table head repeats itself on a continuation, which no grid
+ * of boxes does.
+ */
+
+/* Each checkpoint opens its own page. A whole block does not fit one page once
+ * the images are large enough to be evidence - the detail, sensor, findings and
+ * notes tables alone take about 180mm of the 259mm available - so a checkpoint
+ * runs to two pages: identity, detail and the evidence grid on the first, the
+ * sensor reading and what was found on the second. Letting the blocks flow
+ * instead packs the pages but starts every checkpoint at a different place on
+ * a different page, which is what makes a run of sixty unreadable.
+ *
+ * The first block stays put, so the section heading and the first zone header
+ * are not left alone on a page of their own. */
+.checkpoint-block { margin: 0 0 9mm; }
+
+/* The page break goes on the zone header, not on the block. Put it on the
+ * block and a forced break outranks the header's own break-after: avoid, which
+ * leaves the header stranded at the foot of the previous page, above the group
+ * it heads. On the header, the first block of a zone follows it on the same
+ * page and only a second or later block in the same zone needs its own break.
+ *
+ * The first header stays put so the section heading is not left alone. */
+.zone-head { break-before: page; }
+.checkpoints > .zone-head:first-of-type { break-before: avoid; }
+.checkpoint-block + .checkpoint-block { break-before: page; }
+
+h4, h5 { color: var(--primary-colour); font-weight: bold; }
+
+h4.checkpoint-head {
+  font-size: 11pt;
+  margin: 0 0 2mm;
+}
+
+h5 {
+  font-size: 8.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 6mm 0 2mm;
+}
+
+/* A zone header belongs to the group under it (5.5 keeps it there). */
+.zone-head {
+  font-size: 10.5pt;
+  margin: 10mm 0 3mm;
+  padding-bottom: 1mm;
+  border-bottom: 0.6pt solid #c8c8c8;
+}
+
+.checkpoint-id,
+.checkpoint-seq {
+  font-weight: normal;
+  font-size: 8pt;
+  color: #666;
+  margin-left: 3mm;
+}
+
+/* The two badges 3.2 keeps apart, side by side and never collapsed. */
+.badge-pair { margin: 0 0 4mm; }
+.badge-pair .badge-small { margin-right: 3mm; width: 22mm; }
+
+/* --- the evidence grid --------------------------------------------------- */
+
+.evidence-grid { table-layout: fixed; margin-top: 3mm; }
+
+.evidence-grid thead { display: table-header-group; }
+.evidence-grid tr { break-inside: avoid; }
+
+.evidence-grid thead th {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 8pt;
+  padding-bottom: 1.5mm;
+}
+
+/* Selector carries `td` so it outranks the `td:last-child { padding-right: 0 }`
+ * further up. Without that the fourth column has no gutter, and its images
+ * render 4.7% wider than the other three - a grid that does not line up. */
+.evidence-grid td.evidence-cell {
+  width: 25%;
+  padding: 2mm 2mm 3mm 0;
+  text-align: center;
+  vertical-align: top;
+}
+
+/* Every slot is the same size whatever shape the image is. The RGB frames in
+ * this data are portrait and the thermal ones landscape, so left to themselves
+ * the cells come out ragged and no two rows line up. A fixed box with
+ * object-fit: contain letterboxes each image instead of cropping or stretching
+ * it - nothing is hidden and no proportion is altered, which matters when the
+ * picture is the evidence. */
+.evidence-rgb,
+.evidence-thermal {
+  display: block;
+  width: 100%;
+  object-fit: contain;
+  margin: 0 0 1mm;
+}
+
+.evidence-rgb { height: 35mm; }
+.evidence-thermal { height: 20mm; }
+
+/* The direction label reads first, so a reader finds a compass point without
+ * counting cells across. */
+.direction {
+  display: block;
+  font-weight: bold;
+  font-size: 8pt;
+  margin-bottom: 1mm;
+}
+
+.modality {
+  display: block;
+  font-size: 7pt;
+  color: #555;
+  margin-bottom: 0.5mm;
+}
+
+/* 3.2 asks for a placeholder of the same size as the picture it stands in for,
+ * so each matches its slot exactly. A minimum rather than a fixed height: the
+ * reason a file could not be used has to stay readable (3.6), and a long one
+ * grows the box rather than being clipped out of the document. */
+.image-absent,
+.thermal-absent {
+  display: block;
+  box-sizing: border-box;
+  font-size: 7.5pt;
+  line-height: 1.35;
+  color: #555;
+  border: 0.4pt dashed #b4b4b4;
+  margin-bottom: 1mm;
+}
+
+.image-absent { min-height: 35mm; padding: 15mm 1.5mm 2mm; }
+.thermal-absent { min-height: 20mm; padding: 8mm 1.5mm 2mm; }
+
+/* --- the sensor table ---------------------------------------------------- */
+
+.sensor-table th { font-weight: normal; }
+
+.sensor-block-head th {
+  font-weight: bold;
+  color: var(--primary-colour);
+  border-bottom: 0.6pt solid #c8c8c8;
+  padding-top: 2.5mm;
+}
+
+/* --- sensor warnings and operator notes ---------------------------------- */
+
+.warning-list {
+  margin: 0 0 3mm;
+  padding-left: 0;
+  list-style: none;
+}
+
+.warning-list li { margin-bottom: 1.5mm; }
+.warning-list .badge-small { margin-right: 2mm; }
+
+/* 2.9: notes are printed verbatim under their own label and never read as an
+ * inspection conclusion. Set apart so nobody mistakes it for the report's own
+ * narrative. */
+.operator-notes {
+  padding: 2mm 3mm;
+  border-left: 2pt solid #c8c8c8;
+  color: #333;
 }

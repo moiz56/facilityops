@@ -1,0 +1,207 @@
+{# One checkpoint's section - 3.2.
+
+   Eight parts, in the order 3.2 lists them: heading, the two status badges, a
+   detail table, the evidence grid, the sensor table, the sensor's own
+   warnings, the findings that name this checkpoint, and the operator notes.
+
+   Nothing here decides anything. Which cell shows a picture and which shows
+   words, whether a sensor block carries values, and why a value is not there,
+   were all settled by detect_gaps and assembled by checkpoint_views (5.4).
+
+   Every free-text field on the page - notes, observed, expected_text,
+   missed_reason, a finding's description - is rendered through autoescaping,
+   so a field holding <script> or {{ '{{ config }}' }} prints as written (5.5). #}
+
+<section class="section checkpoints">
+
+  <h2>Checkpoints</h2>
+
+{% for group in checkpoint_zones %}
+
+  {# 3.1 groups the checkpoint sections by zone, with a header per group. 2.2
+     calls zone the grouping key; a run can put several checkpoints in one zone
+     or one in each. styles.css keeps a zone header with the group it heads. #}
+  <h3 class="zone-head">{{ group.zone }}</h3>
+
+  {% for view in group.checkpoints %}
+  {% set point = view.checkpoint %}
+  <div class="checkpoint-block">
+
+    {# --- heading and the two badges (3.2) --- #}
+    <h4 class="checkpoint-head">
+      {{ point.checkpoint_name }}
+      <span class="checkpoint-id">{{ point.checkpoint_id }}</span>
+      {% if point.sequence_number is not none %}
+        <span class="checkpoint-seq">Sequence {{ point.sequence_number }}</span>
+      {% endif %}
+    </h4>
+
+    {# 3.2: two badges, side by side, never collapsed into one. status says
+       whether the robot arrived; result_status is the verdict it recorded.
+       A checkpoint can be COMPLETED and FAIL, which is why both are here. #}
+    <p class="badge-pair">
+      <span class="badge badge-small badge-{{ point.status | status_style }}">{{ point.status }}</span>
+      <span class="badge badge-small badge-{{ point.result_status | verdict_style }}">{{ point.result_status }}</span>
+    </p>
+
+    {% if view.missed_reason %}
+      <p class="absent-strong">Not reached. {{ view.missed_reason }}</p>
+    {% endif %}
+
+    {# --- detail table (3.2) --- #}
+    <table class="detail-table">
+      <tbody>
+        <tr><th>Recorded</th><td>{{ point.timestamp | moment }}</td></tr>
+        <tr><th>Zone</th><td>{{ point.zone }}</td></tr>
+        <tr><th>Position</th><td>{{ point.coordinates | place | show }}</td></tr>
+        <tr><th>Rule type</th><td>{{ point.rule_type | show }}</td></tr>
+        <tr><th>Confidence</th><td>{{ point.confidence | measure | show("Not scored") }}</td></tr>
+        <tr><th>Observed</th><td>{{ point.observed | show }}</td></tr>
+        <tr><th>Expected</th><td>{{ point.expected_text | show }}</td></tr>
+      </tbody>
+    </table>
+
+    {# --- evidence grid (3.2) ---
+
+       A table rather than a grid of boxes, because a table head repeats itself
+       when the rows run past a page end. That is what carries 5.5's repeated
+       heading onto the continuation, and it breaks between rows of cells and
+       never inside one. #}
+    {% if view.no_evidence %}
+      <p class="absent-strong">No evidence captured. {{ view.no_evidence }}</p>
+    {% endif %}
+
+    <table class="evidence-grid">
+      <thead>
+        <tr>
+          <th colspan="{{ grid_columns }}">
+            Evidence - {{ point.checkpoint_name }}
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in view.cells | batch(grid_columns) %}
+          <tr>
+            {% for cell in row %}
+              <td class="evidence-cell">
+                <span class="direction">{{ cell.direction }}</span>
+
+                {% if cell.rgb_src %}
+                  <img class="evidence-rgb" src="{{ cell.rgb_src }}" alt="{{ cell.direction }}">
+                {% else %}
+                  <span class="image-absent">{{ cell.rgb_absent }}</span>
+                {% endif %}
+
+                {# The label sits outside the branch. Inside it, a cell with no
+                   thermal loses the label's height and its placeholder rides
+                   about 4mm above the thermal images either side of it, so a
+                   row of mixed cells does not line up. #}
+                <span class="modality">Thermal</span>
+                {% if cell.thermal_src %}
+                  <img class="evidence-thermal" src="{{ cell.thermal_src }}" alt="{{ cell.direction }} thermal">
+                {% else %}
+                  <span class="thermal-absent">{{ cell.thermal_absent }}</span>
+                {% endif %}
+              </td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {# --- sensor table (3.2, and the rule in 2.8) ---
+
+       A block with no rows has no numbers to print, because none were read.
+       The words name the device that said so. #}
+    <h5>Sensor</h5>
+
+    {% if view.sensor.unavailable %}
+      <p class="absent-strong">Sensor unavailable - {{ view.sensor.unavailable }}</p>
+    {% else %}
+      {% if view.sensor.stale %}
+        <p class="absent-strong">Reading stale - {{ view.sensor.stale }}</p>
+      {% endif %}
+
+      <table class="detail-table sensor-table">
+        <tbody>
+          {% for block in view.sensor.blocks %}
+            <tr class="sensor-block-head">
+              <th colspan="2">{{ block.name }}</th>
+            </tr>
+            {% if block.absent %}
+              <tr><td colspan="2"><span class="absent">{{ block.absent }}</span></td></tr>
+            {% else %}
+              {% for label, value in block.rows %}
+                <tr><th>{{ label }}</th><td>{{ value }}</td></tr>
+              {% endfor %}
+            {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    {# --- the sensor's own warnings (3.2) --- #}
+    {% if view.sensor.warnings %}
+      <h5>Sensor warnings</h5>
+      <ul class="warning-list">
+        {% for warning in view.sensor.warnings %}
+          <li>
+            <span class="badge badge-small badge-{{ warning.severity | severity_style }}">
+              {{- warning.severity | show("unrated") -}}
+            </span>
+            {{ warning.label | show }} - {{ warning.description | show }}
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {# --- findings naming this checkpoint (3.2) ---
+
+       The same entries the findings summary lists. 3.2 asks for them here as
+       well, so a reader working through one checkpoint does not have to hold
+       the summary in their head. #}
+    <h5>Findings</h5>
+
+    {% if view.findings %}
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Severity</th>
+            <th>Feature</th>
+            <th>What was found</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for finding in view.findings %}
+            <tr>
+              <td>
+                <span class="badge badge-small badge-{{ finding.severity | severity_style }}">
+                  {{- finding.severity -}}
+                </span>
+              </td>
+              <td>{{ finding.feature | show }}</td>
+              <td>{{ finding.description | show }}</td>
+              <td>{{ finding.status }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="absent-note">No findings recorded for this checkpoint.</p>
+    {% endif %}
+
+    {# --- operator notes (3.2, 2.9) ---
+
+       Verbatim, under that label. 2.9 is explicit: this field can hold
+       developer text, and it is neither the engine's job to filter it nor to
+       dress it up as an inspection conclusion. #}
+    <h5>Operator notes</h5>
+    <p class="operator-notes">{{ point.notes | show("No operator notes recorded.") }}</p>
+
+  </div>
+  {% endfor %}
+
+{% endfor %}
+
+</section>
