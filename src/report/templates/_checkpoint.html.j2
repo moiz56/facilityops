@@ -49,15 +49,26 @@
     {% endif %}
 
     {# --- detail table (3.2) --- #}
-    <table class="detail-table">
+    {# Two label/value pairs to a row. The same seven fields 3.2 lists, in the
+       same order, read down the left column then down the right; the expected
+       condition takes the full width because it is a sentence, not a value. #}
+    <table class="detail-table detail-pairs">
       <tbody>
-        <tr><th>Recorded</th><td>{{ point.timestamp | moment }}</td></tr>
-        <tr><th>Zone</th><td>{{ point.zone }}</td></tr>
-        <tr><th>Position</th><td>{{ point.coordinates | place | show }}</td></tr>
-        <tr><th>Rule type</th><td>{{ point.rule_type | show }}</td></tr>
-        <tr><th>Confidence</th><td>{{ point.confidence | measure | show("Not scored") }}</td></tr>
-        <tr><th>Observed</th><td>{{ point.observed | show }}</td></tr>
-        <tr><th>Expected</th><td>{{ point.expected_text | show }}</td></tr>
+        <tr>
+          <th>Recorded</th><td>{{ point.timestamp | moment }}</td>
+          <th>Rule type</th><td>{{ point.rule_type | show }}</td>
+        </tr>
+        <tr>
+          <th>Zone</th><td>{{ point.zone }}</td>
+          <th>Confidence</th><td>{{ point.confidence | measure | show("Not scored") }}</td>
+        </tr>
+        <tr>
+          <th>Position</th><td>{{ point.coordinates | place | show }}</td>
+          <th>Observed</th><td>{{ point.observed | show }}</td>
+        </tr>
+        <tr>
+          <th>Expected</th><td colspan="3">{{ point.expected_text | show }}</td>
+        </tr>
       </tbody>
     </table>
 

@@ -19,22 +19,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
-__all__ = [
-    # coordinates
-    "Pose", "Point2D",
-    # the pieces of a sensor reading
-    "Accelerometer", "Environment", "Particulate", "SensorWarning", "RawSensor",
-    # the two sensor readings
-    "SensorBlock", "SampleSensor",
-    # what a run is made of
-    "Checkpoint", "Finding", "SensorAlert", "SensorSample", "Event",
-    # the run
-    "Record",
-    # the engine's own
-    "FieldAnomaly",
-]
-
-
 # --- coordinates ---
 #
 # Two shapes, so two types: nothing should assume all four keys are there.
@@ -61,16 +45,10 @@ class Point2D:
     x: float | None = None
     y: float | None = None
 
-
-# ---------------------------------------------------------------------------
 # The pieces of a sensor reading
 #
 # Each measurement block is governed by a device health flag in RawSensor. When
-# a flag is false the block's values are placeholders, not measurements - the
-# rule that decides this is in report/gaps.py, not here.
-# ---------------------------------------------------------------------------
-
-
+# a flag is false the block's values are placeholders, not measurements
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Accelerometer:
     """Movement and vibration. Governed by adxl345_ok."""
@@ -80,8 +58,6 @@ class Accelerometer:
     accel_z: float | None = None
     vibration_peak: float | None = None
     vibration_rms_g: float | None = None
-
-
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Environment:
     """Temperature, humidity and pressure. Governed by bme680_ok."""
@@ -89,26 +65,18 @@ class Environment:
     temperature_c: float | None = None
     humidity_pct: float | None = None
     pressure_hpa: float | None = None
-
-
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Particulate:
     """Airborne particulate counts. Governed by sps30_ok.
-
-    In the reference run that flag is false at every checkpoint and every value
-    here reads 0.0. Those zeros are an offline sensor, not clean air.
     """
 
     pm1_0: float | None = None
     pm2_5: float | None = None
     pm4_0: float | None = None
     pm10: float | None = None
-
-
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SensorWarning:
     """A threshold warning the sensor hub raised at one checkpoint."""
-
     code: str | None = None
     label: str | None = None
     description: str | None = None
@@ -135,15 +103,10 @@ class RawSensor:
     received_at: datetime | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
 
-
-# ---------------------------------------------------------------------------
 # The two sensor readings
 #
 # A checkpoint's reading and a sample's reading are different shapes, and are
 # kept as different types. Section 2.6 warns against reusing one for both.
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SensorBlock:
     """What the sensor hub reported at one checkpoint.
@@ -151,7 +114,6 @@ class SensorBlock:
     `ok`, `status` and `sensor_hub_reachable` say whether the reading can be
     trusted at all; `age_seconds` says how stale it was when recorded.
     """
-
     ok: bool | None = None
     status: str | None = None
     source: str | None = None
@@ -178,13 +140,6 @@ class SampleSensor:
     accelerometer: Accelerometer | None = None
     environment: Environment | None = None
     particulate: Particulate | None = None
-
-
-# ---------------------------------------------------------------------------
-# What a run is made of
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Checkpoint:
     """One stop on the route.
@@ -268,8 +223,6 @@ class SensorAlert:
 class SensorSample:
     """One telemetry reading, roughly one every two seconds.
 
-    Samples are never rendered one by one. derive.py rolls them up per zone
-    into a min, mean and max.
     """
 
     timestamp: datetime | None = None
@@ -303,19 +256,12 @@ class Event:
     checkpoint_name: str | None = None
     evidence_count: int | None = None
 
-
-# ---------------------------------------------------------------------------
-# The run
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Record:
     """One inspection run.
 
     The seven count fields are declared, not derived: they are what the robot
-    reported, and may disagree with the arrays beside them. Reconciling the two
-    is derive.py's job, and both figures get printed where they differ.
+    reported, and may disagree with the arrays beside them.
 
     `checkpoints` stays a tuple and is never keyed by checkpoint_id here.
     Duplicate ids do occur, and have to be reported rather than collapsed into
@@ -355,32 +301,15 @@ class Record:
     anomalies: tuple[FieldAnomaly, ...] = ()
     source_path: Path | None = None
 
-
-# ---------------------------------------------------------------------------
-# The engine's own type
-#
-# Everything above mirrors the record. This does not.
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FieldAnomaly:
     """A field that was there but could not be used as recorded.
-
-    A confidence written as the string "0.94" is refused rather than converted,
-    since a converted one would appear in the report as a measurement. Refusing
-    it silently would be worse, so the refusal travels here.
-
-    Not a Gap. The ten gap types are a closed set and none of them means "wrong
-    type", so these ride on Record.anomalies and are rendered, but never appear
-    in the manifest's gaps array.
 
     `problem` quotes the value as recorded, so the text of an unparseable
     timestamp or a refused number survives into the report.
 
     `item_id` is a checkpoint_id, or "__run__" for a run-level field.
     """
-
     item_id: str
     field_name: str
     problem: str

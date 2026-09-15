@@ -16,9 +16,6 @@ from datetime import datetime, timezone
 
 from common.paths import setting
 
-__all__ = ["Provenance", "stamp"]
-
-
 @dataclass(frozen=True)
 class Provenance:
     """The four facts 5.6 requires of every report."""

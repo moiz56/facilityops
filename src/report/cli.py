@@ -40,9 +40,6 @@ from report.render import render_pdf
 # Named explicitly: run as "python -m report.cli", __name__ would be "__main__".
 logger = logging.getLogger("report.cli")
 
-__all__ = ["Artifacts", "run_pipeline", "log_summary", "dump_record", "dump_artifacts", "main"]
-
-
 @dataclass(frozen=True)
 class Artifacts:
     """What the pipeline produced. Later stages add their outputs here."""

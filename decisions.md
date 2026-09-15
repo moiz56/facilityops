@@ -240,6 +240,24 @@
 
 120. The summary table declares its column widths and sets its own header type. The shared header style spaces its capitals out, which broke "THERMAL" and "FINDINGS" across two lines in a narrow column, and left to itself the table gave the status badge less room than the badge needs while breaking a zone name mid-word. Widths total 175mm of the 178mm available and are each sized to their longest real content. A zone name longer than its column still wraps rather than overflowing, which is the right behaviour for an input this engine has not seen.
 
+121. The report is restyled to read as an audit workpaper rather than a generic document. Arial at 9.5pt with `Liberation Sans` behind it - Arial is not present on a Linux container and Liberation Sans is metric-compatible, so TA-08's clean machine renders the same page. Headings 16pt down to 8pt, the navy already in `branding.primary_colour` as the one accent, a grey scale for structure, and green, amber and red used only where a word already says the same thing. Colour is still never the sole carrier: this document gets photocopied.
+
+122. Major sections are numbered by CSS counter rather than in the templates. The cover is the title page and is excluded, so the sections run 1 to 6. A counter keeps the numbering correct when `sections` in config turns one off (5.7) - hard-coded numbers in the templates would leave a gap where a disabled section used to be, and 4.4 already requires the manifest to omit it.
+
+123. Table headers are a filled navy band with white type, and rows alternate against a near-white panel. The tint is deliberately slight: enough to follow a row across nine columns, not enough to compete with a FAIL badge. The findings table alternates by `tbody` rather than by row, because each finding owns two rows there and striping by row would shade half of every finding.
+
+124. Status badges are filled rather than outlined. A verdict is the first thing a reader looks for, and the word is always inside the badge, so it still reads in a photocopy where the fill is grey. The values printed are unchanged: PASS, FAIL, WARN, COMPLETED and MISSED are what 2.2 records, and this engine does not relabel them as PASSED or FAILED. An enum 2.2 does not list still takes the neutral fill (11).
+
+125. Checkpoint details are two label/value pairs to a row rather than seven stacked rows. The same seven fields 3.2 lists, in the same order, read down the left column then down the right, with the expected condition spanning the full width because it is a sentence and not a value. This halves the height of the panel, which is what leaves room for both rows of the evidence grid on the same page.
+
+126. The evidence cells keep their plain format through the restyle: a bold direction label, the image, the thermal label, the thermal image, with no cell border and no tinted strip. Bordered tiles with a tinted direction strip were tried and withdrawn on request. The photographs are the evidence and the chrome round them competes with what they show, which is also why the restyle leaves the grid alone while changing every table around it. The dashed placeholder box stays, because 3.6 needs an absence to be visible and a bare line of text is not.
+
+127. A running head carries the report title, the facility name and the run id on every page. 5.6 already requires the four provenance facts in the footer; the head is so a page separated from the file still says which document and which run it belongs to. It is injected by render.py for the same reason the footer is - the run id is not a static value.
+
+128. The alerts section capitalises its severity headings in CSS. 2.5's severities are lowercase and are printed exactly as recorded; `text-transform` changes the glyphs drawn, not the value in the document, which is the same class of choice as decision 92's badge colour. An unlisted severity still heads its own block under its own name.
+
+129. The summary table's header face is 6.2pt and its nine column widths total 177mm of the 178mm available, each allowing for the 6pt of cell padding either side that the new table style adds. Sized from the longest real content: the COMPLETED badge, the word FINDINGS, and a zone name that has to sit on one line or it breaks mid-word.
+
 # Questions to raise
 
 1. branding.yaml is a standalone file but the config.yaml in the document contains a branding section, for now I have put both in the config.yaml making branding.yaml empty but is this the way to go

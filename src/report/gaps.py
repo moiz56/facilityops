@@ -23,17 +23,6 @@ from common.schema import Checkpoint, Finding, Record, SensorBlock
 from report.derive import SUBSYSTEM_FLAGS, computed_counts, declared_counts
 from report.images import DirectionCell, build_direction_grid
 
-__all__ = [
-    "RUN_LEVEL", "GapType", "Gap",
-    "MAX_AGE_SECONDS", "SUBSYSTEM_FLAGS", "unavailable_reason",
-    "missed_checkpoint_gaps", "no_evidence_gaps", "missing_image_gaps",
-    "missing_thermal_gaps", "sensor_unavailable_gaps", "subsystem_offline_gaps",
-    "stale_reading_gaps", "no_findings_gaps", "count_mismatch_gaps",
-    "offline_block_gaps",
-    "empty_record_gaps", "disagreeing_counts", "checkpoint_gaps",
-    "run_gaps", "detect_gaps",
-]
-
 #: item_id for a gap that belongs to the run itself rather than to a checkpoint.
 RUN_LEVEL = "__run__"
 

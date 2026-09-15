@@ -23,17 +23,6 @@ from typing import Sequence
 from common.paths import CONFIG_PATH, load_config, setting
 from common.schema import Checkpoint, Record, SensorSample
 
-__all__ = [
-    # the reconciliation counts
-    "Counts", "declared_counts", "computed_counts", "alert_counts",
-    # the zone telemetry table
-    "SUBSYSTEM_FLAGS", "ZoneStat", "ZoneRow",
-    "summarise", "sample_values", "offline_blocks", "zone_stat",
-    "zone_order", "zone_row", "zone_rows",
-    # everything above, for one run
-    "DerivedValues", "derive_report_values",
-]
-
 _config = load_config(CONFIG_PATH)
 
 #: raw device flag -> the sensor block it governs. The block names are the

@@ -41,25 +41,6 @@ from report.images import GRID_COLUMNS, DirectionCell, prepare_image
 
 logger = logging.getLogger("report.render")
 
-__all__ = [
-    "TEMPLATE_DIR", "STYLES_PATH", "SECTION_NAMES",
-    "environment", "show", "moment", "sections",
-    "CountRow", "count_rows", "CoverageItem", "coverage_items",
-    "run_count_conflicts",
-    "VERDICT_STYLES", "verdict_style", "STATUS_STYLES", "status_style",
-    "SEVERITY_STYLES", "severity_style", "place",
-    "CONFIRMED_STATUSES", "REVIEW_STATUS", "FindingGroup", "finding_groups",
-    "ALERT_SEVERITIES", "AlertGroup", "alert_groups",
-    "EvidenceCell", "image_absence", "image_source", "evidence_cells",
-    "SENSOR_BLOCKS", "SensorBlockView", "SensorView", "reading",
-    "sensor_block_view", "sensor_view",
-    "CheckpointView", "checkpoint_views", "ZoneGroup", "zone_groups",
-    "SummaryRow", "evidence_tally", "sensor_summary", "summary_rows",
-    "ZONE_COLUMNS", "measure", "device_name", "zone_absence",
-    "provenance_line", "logo_uri", "css_string", "runtime_css",
-    "render_html", "render_pdf",
-]
-
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 STYLES_PATH = TEMPLATE_DIR / "styles.css"
 
@@ -903,21 +884,40 @@ def css_string(text: str) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def runtime_css(config: dict, footer: str) -> str:
+def header_lines(record: Record) -> tuple[str, str]:
+    """What the running head says on the left and on the right of every page.
+
+    A page separated from the rest of the file still has to say what document
+    it belongs to, which is the same reason 5.6 puts the run id in the footer.
+    The facility name is what a reader recognises; the run id is what they
+    match against the manifest.
+    """
+    return f"Inspection Report - {record.facility_name}", f"Run {record.run_id}"
+
+
+def runtime_css(config: dict, footer: str, header: tuple[str, str] | None = None) -> str:
     """The stylesheet values that are not fixed by styles.css.
 
-    Three things cannot live in a static file: the page size and brand colour
-    are config (5.7), and the footer names the run it was generated for (5.6).
-    Putting them here keeps those config keys real rather than decorative.
+    Four things cannot live in a static file: the page size and brand colour
+    are config (5.7), and the footer and running head name the run they were
+    generated for (5.6). Putting them here keeps those config keys real rather
+    than decorative.
 
     Everything else about the page, page breaks included, stays in styles.css as
     5.5 requires.
     """
-    return (
+    css = (
         f"@page {{ size: {setting(config, 'report', 'page_size')}; }}\n"
         f"@page {{ @bottom-left {{ content: {css_string(footer)}; }} }}\n"
         f":root {{ --primary-colour: {setting(config, 'branding', 'primary_colour')}; }}\n"
     )
+    if header is not None:
+        left, right = header
+        css += (
+            f"@page {{ @top-left {{ content: {css_string(left)}; }} }}\n"
+            f"@page {{ @top-right {{ content: {css_string(right)}; }} }}\n"
+        )
+    return css
 
 
 # --- rendering ---------------------------------------------------------------
@@ -1018,7 +1018,7 @@ def render_pdf(
             path,
             stylesheets=[
                 CSS(filename=str(STYLES_PATH)),
-                CSS(string=runtime_css(config, footer)),
+                CSS(string=runtime_css(config, footer, header_lines(record))),
             ],
         )
     logger.info("rendered %d checkpoints to %s", len(record.checkpoints), path)
