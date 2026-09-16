@@ -1,12 +1,4 @@
 """Version stamping: what produced a report, and when.
-
-5.6 requires the same four facts in every page footer and in the manifest. Both
-read them from here, so neither can claim a different engine version from the
-other.
-
-The two versions are config values rather than constants in this file. A
-release changes one line of config/report.yaml and the footer, the manifest and
-the config hash all follow it.
 """
 
 from __future__ import annotations
@@ -28,14 +20,6 @@ class Provenance:
 
 def stamp(run_id: str, config: dict) -> Provenance:
     """Record what is producing this report, and when.
-
-    The versions come from the config that was actually applied, so a report
-    cannot carry one engine version in its footer and another in its manifest.
-    A version the config does not declare is an error naming the key, never a
-    silent default that would stamp a wrong number onto every page (5.7).
-
-    The timestamp is the moment of rendering, in UTC, so two reports of the same
-    run are told apart by when they were made rather than by when the run was.
     """
     return Provenance(
         engine_version=setting(config, "provenance", "engine_version"),

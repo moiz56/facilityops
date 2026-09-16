@@ -1,18 +1,4 @@
-{# Findings summary - 3.1.
-
-   All run-level findings in a table. The same findings render again inside
-   their own checkpoint sections (3.2), because 3.2 asks for them "here as well
-   as in the summary".
-
-   Which table a finding lands in is finding_groups' answer, not a test made
-   here (5.4). 3.6 gives one rule - an abstained finding is shown as requiring
-   review, never as a confirmed finding, and never dropped - and 11 forbids
-   mapping a status section 2 does not list onto one it does, so a third block
-   holds those and claims nothing about them.
-
-   description and recommended_action are free text. Autoescaping is on, so a
-   field holding <script> or {{ '{{ config }}' }} renders as written (5.5). #}
-<section class="section findings">
+<section class="section findings" id="findings">
 
   <h2>Findings</h2>
 
@@ -35,6 +21,19 @@
       {% if group.findings %}
         <p class="lede">{{ group.lede }}</p>
         <table class="data-table findings-table">
+          {# Five equal columns leave Checkpoint about 33mm of text, and
+             `home_docking_station` is wider than that, so the shared
+             overflow-wrap broke it mid-word - "home_docking_statio" above an
+             orphaned "n". The widths are declared here instead: Severity and
+             Status hold short words, so the space they were given goes to the
+             two columns that carry identifiers. #}
+          <colgroup>
+            <col class="col-severity">
+            <col class="col-checkpoint">
+            <col class="col-feature">
+            <col class="col-status">
+            <col class="col-recorded">
+          </colgroup>
           <thead>
             <tr>
               <th>Severity</th>
@@ -44,8 +43,6 @@
               <th>Recorded</th>
             </tr>
           </thead>
-          {# One tbody per finding, holding both its rows. styles.css keeps a
-             tbody whole, so a finding never straddles a page break (TA-06). #}
           {% for finding in group.findings %}
             <tbody class="finding">
               <tr>
@@ -55,7 +52,10 @@
                   </span>
                 </td>
                 <td>
-                  {{ finding.checkpoint_id | show }}
+                  {# nowrap on the id alone: the zone beneath it is prose and
+                     may wrap, but an id split across two lines reads as two
+                     different ids. #}
+                  <span class="finding-checkpoint">{{ finding.checkpoint_id | show }}</span>
                   {% if finding.zone and finding.zone != finding.checkpoint_id %}
                     <span class="finding-zone">{{ finding.zone }}</span>
                   {% endif %}
@@ -75,24 +75,22 @@
                     <span class="finding-label">What was found</span>
                     {{ finding.description | show }}
                   </span>
-                  {% if finding.recommended_action %}
-                    <span class="finding-line">
-                      <span class="finding-label">Recommended</span>
-                      {{ finding.recommended_action }}
-                    </span>
-                  {% endif %}
-                  {% if finding.coordinates | place %}
-                    <span class="finding-line">
-                      <span class="finding-label">Position</span>
-                      {{ finding.coordinates | place }}
-                    </span>
-                  {% endif %}
-                  {% if finding.evidence_image %}
-                    <span class="finding-line">
-                      <span class="finding-label">Evidence</span>
-                      {{ finding.evidence_image }}
-                    </span>
-                  {% endif %}
+                  {# Every line prints, whether or not the field carries
+                     anything. A line that vanishes when the field is null tells
+                     a reader nothing about whether the finding had no
+                     recommendation or the report dropped it (0, 3.6). #}
+                  <span class="finding-line">
+                    <span class="finding-label">Recommended</span>
+                    {{ finding.recommended_action | show("No recommended action recorded") }}
+                  </span>
+                  <span class="finding-line">
+                    <span class="finding-label">Position</span>
+                    {{ finding.coordinates | place | show("No position recorded") }}
+                  </span>
+                  <span class="finding-line">
+                    <span class="finding-label">Evidence</span>
+                    {{ finding.evidence_image | show("No evidence image linked") }}
+                  </span>
                   <span class="finding-line">
                     <span class="finding-label">Reference</span>
                     <span class="finding-id">{{ finding.finding_id }}</span>

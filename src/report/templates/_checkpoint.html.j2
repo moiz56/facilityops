@@ -12,7 +12,19 @@
    missed_reason, a finding's description - is rendered through autoescaping,
    so a field holding <script> or {{ '{{ config }}' }} prints as written (5.5). #}
 
-<section class="section checkpoints">
+{# A field the loader refused prints the gap type where its value would have
+   been. "Not recorded" and "Not scored" are what an absent field reads as, and
+   a refused one is a different fact: the record carried something and it could
+   not be used, so the cell says which (decision 168). #}
+{% macro cell(refused, field, value) -%}
+  {%- if field in refused -%}
+    <span class="gap-tag">{{ refused[field].gap_type }}</span>
+  {%- else -%}
+    {{ value }}
+  {%- endif -%}
+{%- endmacro %}
+
+<section class="section checkpoints" id="checkpoints">
 
   <h2>Checkpoints</h2>
 
@@ -44,9 +56,25 @@
       <span class="badge badge-small badge-{{ point.result_status | verdict_style }}">{{ point.result_status }}</span>
     </p>
 
-    {% if view.missed_reason %}
-      <p class="absent-strong">Not reached. {{ view.missed_reason }}</p>
+    {# Every absence stated because detect_gaps raised a gap names that gap, so
+       a reader can match the sentence to the manifest entry behind it (4.4). #}
+    {% if view.missed %}
+      <p class="absent-strong">
+        <span class="gap-tag">{{ view.missed.gap_type }}</span>
+        Not reached. {{ view.missed.detail }}
+      </p>
     {% endif %}
+
+    {# Fields this checkpoint recorded as the wrong type. The loader refused
+       each one rather than converting it, so the table below prints the field
+       as not recorded and this says why - a confidence written as "0.94" is a
+       string, and never becomes a measurement on the way to the page (TA-27). #}
+    {% for note in view.datatypes %}
+      <p class="absent-strong">
+        <span class="gap-tag">{{ note.gap_type }}</span>
+        Refused as recorded, and left unset. {{ note.detail }}
+      </p>
+    {% endfor %}
 
     {# --- detail table (3.2) --- #}
     {# Two label/value pairs to a row. The same seven fields 3.2 lists, in the
@@ -55,19 +83,19 @@
     <table class="detail-table detail-pairs">
       <tbody>
         <tr>
-          <th>Recorded</th><td>{{ point.timestamp | moment }}</td>
-          <th>Rule type</th><td>{{ point.rule_type | show }}</td>
+          <th>Recorded</th><td>{{ cell(view.refused, "timestamp", point.timestamp | moment) }}</td>
+          <th>Rule type</th><td>{{ cell(view.refused, "rule_type", point.rule_type | show) }}</td>
         </tr>
         <tr>
-          <th>Zone</th><td>{{ point.zone }}</td>
-          <th>Confidence</th><td>{{ point.confidence | measure | show("Not scored") }}</td>
+          <th>Zone</th><td>{{ cell(view.refused, "zone", point.zone) }}</td>
+          <th>Confidence</th><td>{{ cell(view.refused, "confidence", point.confidence | measure | show("Not scored")) }}</td>
         </tr>
         <tr>
-          <th>Position</th><td>{{ point.coordinates | place | show }}</td>
-          <th>Observed</th><td>{{ point.observed | show }}</td>
+          <th>Position</th><td>{{ cell(view.refused, "coordinates", point.coordinates | place | show) }}</td>
+          <th>Observed</th><td>{{ cell(view.refused, "observed", point.observed | show) }}</td>
         </tr>
         <tr>
-          <th>Expected</th><td colspan="3">{{ point.expected_text | show }}</td>
+          <th>Expected</th><td colspan="3">{{ cell(view.refused, "expected_text", point.expected_text | show) }}</td>
         </tr>
       </tbody>
     </table>
@@ -79,46 +107,94 @@
        heading onto the continuation, and it breaks between rows of cells and
        never inside one. #}
     {% if view.no_evidence %}
-      <p class="absent-strong">No evidence captured. {{ view.no_evidence }}</p>
+      <p class="absent-strong">
+        <span class="gap-tag">{{ view.no_evidence.gap_type }}</span>
+        No evidence captured. {{ view.no_evidence.detail }}
+      </p>
     {% endif %}
 
-    <table class="evidence-grid">
-      <thead>
-        <tr>
-          <th colspan="{{ grid_columns }}">
-            Evidence - {{ point.checkpoint_name }}
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in view.cells | batch(grid_columns) %}
+    {# A grid whose every cell says the same thing is one fact printed once per
+       cell. Where the checkpoint recorded no evidence path at all the grid
+       collapses to the line below; where every view carried an RGB and none
+       carried a thermal, the cells keep their RGB and the missing thermal is
+       stated once under the grid. A partial grid is never collapsed - that is
+       the case the grid exists for. #}
+    {% if view.evidence.empty %}
+      <p class="evidence-collapsed">
+        No evidence captured - {{ view.evidence.rgb }} views carried an
+        image, and none carried a thermal.
+      </p>
+    {% else %}
+      <table class="evidence-grid">
+        <thead>
           <tr>
-            {% for cell in row %}
-              <td class="evidence-cell">
-                <span class="direction">{{ cell.direction }}</span>
-
-                {% if cell.rgb_src %}
-                  <img class="evidence-rgb" src="{{ cell.rgb_src }}" alt="{{ cell.direction }}">
-                {% else %}
-                  <span class="image-absent">{{ cell.rgb_absent }}</span>
-                {% endif %}
-
-                {# The label sits outside the branch. Inside it, a cell with no
-                   thermal loses the label's height and its placeholder rides
-                   about 4mm above the thermal images either side of it, so a
-                   row of mixed cells does not line up. #}
-                <span class="modality">Thermal</span>
-                {% if cell.thermal_src %}
-                  <img class="evidence-thermal" src="{{ cell.thermal_src }}" alt="{{ cell.direction }} thermal">
-                {% else %}
-                  <span class="thermal-absent">{{ cell.thermal_absent }}</span>
-                {% endif %}
-              </td>
-            {% endfor %}
+            <th colspan="{{ view.evidence.columns }}">
+              Evidence - {{ point.checkpoint_name }}
+            </th>
           </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {# Rows of view.evidence.columns, which is the configured grid_columns
+             or fewer where the checkpoint recorded fewer views. One view fills
+             the row, two sit side by side, and seven draw four and then three.
+             The cells of one checkpoint are all the same width; only how many
+             there are changes (decision 174). #}
+          {% for row in view.evidence.cells | batch(view.evidence.columns) %}
+            <tr>
+              {% for cell in row %}
+                <td class="evidence-cell">
+                  {# Only where the filenames named the view. A route that
+                     photographs each checkpoint once labels nothing, and an
+                     empty caption band above every picture says nothing. #}
+                  {% if cell.view %}
+                    <span class="view-label">{{ cell.view }}</span>
+                  {% endif %}
+
+                  {% if cell.rgb_src %}
+                    <img class="evidence-rgb" src="{{ cell.rgb_src }}" alt="{{ cell.view or point.checkpoint_name }}">
+                  {% else %}
+                    <span class="image-absent">
+                      {% if cell.rgb_gap %}
+                        <span class="gap-tag">{{ cell.rgb_gap }}</span>
+                      {% endif %}
+                      {{ cell.rgb_absent }}
+                    </span>
+                  {% endif %}
+
+                  {# The label sits outside the branch. Inside it, a cell with no
+                     thermal loses the label's height and its placeholder rides
+                     about 4mm above the thermal images either side of it, so a
+                     row of mixed cells does not line up. #}
+                  {% if not view.evidence.thermal_absent %}
+                    <span class="modality">Thermal</span>
+                    {% if cell.thermal_src %}
+                      <img class="evidence-thermal" src="{{ cell.thermal_src }}" alt="{{ cell.view or point.checkpoint_name }} thermal">
+                    {% else %}
+                      <span class="thermal-absent">
+                        {% if cell.thermal_gap %}
+                          <span class="gap-tag">{{ cell.thermal_gap }}</span>
+                        {% endif %}
+                        {{ cell.thermal_absent }}
+                      </span>
+                    {% endif %}
+                  {% endif %}
+                </td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      {% if view.evidence.thermal_absent %}
+        <p class="table-note">
+          {% if view.evidence.thermal_note %}
+            <span class="gap-tag">{{ view.evidence.thermal_note.gap_type }}</span>
+          {% endif %}
+          No thermal image was captured for any view - {{ view.evidence.thermal }}.
+          The RGB images above are the whole of this checkpoint's evidence.
+        </p>
+      {% endif %}
+    {% endif %}
 
     {# --- sensor table (3.2, and the rule in 2.8) ---
 
@@ -127,10 +203,16 @@
     <h5>Sensor</h5>
 
     {% if view.sensor.unavailable %}
-      <p class="absent-strong">Sensor unavailable - {{ view.sensor.unavailable }}</p>
+      <p class="absent-strong">
+        <span class="gap-tag">{{ view.sensor.unavailable.gap_type }}</span>
+        Sensor unavailable - {{ view.sensor.unavailable.detail }}
+      </p>
     {% else %}
       {% if view.sensor.stale %}
-        <p class="absent-strong">Reading stale - {{ view.sensor.stale }}</p>
+        <p class="absent-strong">
+          <span class="gap-tag">{{ view.sensor.stale.gap_type }}</span>
+          Reading stale - {{ view.sensor.stale.detail }}
+        </p>
       {% endif %}
 
       <table class="detail-table sensor-table">
@@ -140,10 +222,26 @@
               <th colspan="2">{{ block.name }}</th>
             </tr>
             {% if block.absent %}
-              <tr><td colspan="2"><span class="absent">{{ block.absent }}</span></td></tr>
+              <tr>
+                <td colspan="2">
+                  {% if block.absent_gap %}
+                    <span class="gap-tag">{{ block.absent_gap }}</span>
+                  {% endif %}
+                  <span class="absent">{{ block.absent }}</span>
+                </td>
+              </tr>
             {% else %}
-              {% for label, value in block.rows %}
-                <tr><th>{{ label }}</th><td>{{ value }}</td></tr>
+              {% for label, value, refused in block.rows %}
+                <tr>
+                  <th>{{ label }}</th>
+                  <td>
+                    {% if refused %}
+                      <span class="gap-tag">{{ refused }}</span>
+                    {% else %}
+                      {{ value }}
+                    {% endif %}
+                  </td>
+                </tr>
               {% endfor %}
             {% endif %}
           {% endfor %}
@@ -151,9 +249,20 @@
       </table>
     {% endif %}
 
-    {# --- the sensor's own warnings (3.2) --- #}
+    {# --- the sensor's own warnings (3.2) ---
+
+       The heading prints whether or not there are warnings. A section that
+       disappears when it holds nothing leaves a reader unable to tell a
+       checkpoint that raised no warning from one where the section failed to
+       render, and 0 asks for an absence to be stated where the missing thing
+       would have been.
+
+       An unavailable reading gets different words: nothing was read, so "no
+       warnings" would be read as good news about a device that said nothing at
+       all (decision 19). #}
+    <h5>Sensor warnings</h5>
+
     {% if view.sensor.warnings %}
-      <h5>Sensor warnings</h5>
       <ul class="warning-list">
         {% for warning in view.sensor.warnings %}
           <li>
@@ -164,6 +273,13 @@
           </li>
         {% endfor %}
       </ul>
+    {% elif view.sensor.unavailable %}
+      <p class="absent-note">
+        No sensor warnings recorded. The reading itself was unavailable, so this
+        is not a statement that the sensors were healthy.
+      </p>
+    {% else %}
+      <p class="absent-note">No sensor warnings recorded for this checkpoint.</p>
     {% endif %}
 
     {# --- findings naming this checkpoint (3.2) ---
@@ -199,7 +315,12 @@
         </tbody>
       </table>
     {% else %}
-      <p class="absent-note">No findings recorded for this checkpoint.</p>
+      <p class="absent-note">
+        {% if view.no_findings %}
+          <span class="gap-tag">{{ view.no_findings.gap_type }}</span>
+        {% endif %}
+        No findings recorded for this checkpoint.
+      </p>
     {% endif %}
 
     {# --- operator notes (3.2, 2.9) ---
@@ -212,6 +333,20 @@
 
   </div>
   {% endfor %}
+
+{% else %}
+
+  {# A run with no checkpoints reached this section too, and a heading with
+     nothing under it reads as a section that failed to render rather than as a
+     run that had nothing to put in one. The cover and the coverage page say the
+     same thing in the same words, from the same gap (decision 177). #}
+  <p class="absent-strong">
+    {% if empty_record %}
+      <span class="gap-tag">{{ empty_record.gap_type }}</span>
+    {% endif %}
+    No checkpoints were recorded for this run, so there are no checkpoint
+    sections to show.
+  </p>
 
 {% endfor %}
 

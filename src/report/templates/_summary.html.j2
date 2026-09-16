@@ -9,7 +9,7 @@
    Nothing is counted here. summary_rows read it all back off the gaps that
    were already raised, so this table cannot say a checkpoint was clean when
    the manifest says otherwise (4.4, 5.4). #}
-<section class="section summary">
+<section class="section summary" id="summary">
 
   <h2>Run summary</h2>
 
@@ -17,8 +17,8 @@
 
     <p class="lede">
       Every checkpoint on the route, in the order it was recorded. Evidence
-      counts are the directions that produced a usable image; a direction whose
-      image is missing or will not open is not counted as captured.
+      counts are the views that produced a usable image; a view whose image is
+      missing or will not open is not counted as captured.
     </p>
 
     <table class="data-table summary-table">
@@ -68,7 +68,19 @@
             </td>
             <td class="figure">{{ row.rgb }}</td>
             <td class="figure">{{ row.thermal }}</td>
-            <td>{{ row.sensor }}</td>
+            {# The gap types first, then the few words that say what they were
+               about. A reader working down this table can match a cell to the
+               manifest without opening the checkpoint's own section (4.4). #}
+            <td>
+              {% if row.sensor_gaps %}
+                {% for name in row.sensor_gaps %}
+                  <span class="gap-tag">{{ name }}</span>
+                {% endfor %}
+                <span class="summary-note">{{ row.sensor }}</span>
+              {% else %}
+                {{ row.sensor }}
+              {% endif %}
+            </td>
             <td class="figure">{{ row.findings }}</td>
           </tr>
         {% endfor %}

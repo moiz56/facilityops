@@ -1,0 +1,2 @@
+This is not a JPEG. It is a text file with a .jpg extension, so that the
+engine has to tell 'will not decode' apart from 'arrived empty' (TA-20).

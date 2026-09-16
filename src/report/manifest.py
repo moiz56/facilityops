@@ -3,9 +3,14 @@
 Downstream code reads the manifest, not the PDF, so its shape is fixed and this
 module matches it field for field.
 
-Two fields cannot be filled until the PDF exists: `page_count` and `sections`
-both describe the rendered document. They carry placeholders for now, and
-PLACEHOLDER_FIELDS names them so nothing ships believing they are real.
+Two fields describe the rendered document rather than the record: `page_count`
+and `sections`. They are measured by render_document, which lays the PDF out,
+reads back the page each section landed on and hands the result here, so 4.4's
+rule that the section ranges match the real PDF holds by construction.
+
+A caller that only wants a manifest can still omit them, and then they say so:
+PLACEHOLDER_FIELDS names the two, and they come back 0 and empty rather than
+guessed at.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from common.provenance import Provenance, stamp
 from common.schema import Record
 from report.derive import alert_counts, computed_counts, declared_counts
 from report.gaps import RUN_LEVEL, Gap
+from report.render import PageMap
 
 # Every version in the manifest is a config value. `manifest.version` is the
 # shape of this file; the engine and template versions, the generation time and
@@ -27,7 +33,7 @@ from report.gaps import RUN_LEVEL, Gap
 # their home, so the manifest and the page footer cannot disagree about any of
 # the four.
 
-#: Fields that cannot be real until render.py exists.
+#: Fields that are only real when the rendered document is passed in.
 PLACEHOLDER_FIELDS = ("page_count", "sections")
 
 
@@ -57,6 +63,7 @@ def build_manifest(
     pdf_path: Path,
     config_path: Path = CONFIG_PATH,
     provenance: Provenance | None = None,
+    pages: PageMap | None = None,
 ) -> dict:
     """Build the manifest for one run.
 
@@ -65,8 +72,10 @@ def build_manifest(
     without one the manifest stamps itself, which keeps the call shape simple
     for a caller that only wants the manifest.
 
-    `page_count` and `sections` are placeholders until the PDF is rendered.
-    Everything else is real.
+    `pages` is what render_document measured off the PDF it wrote: the page
+    count, and the first and last page of every section the config turned on.
+    Another trailing argument with a default, so 5.3's five-argument call still
+    works - without it those two fields are 0 and empty rather than invented.
     """
     found = [image for images_of in images.values() for image in images_of]
 
@@ -85,9 +94,9 @@ def build_manifest(
         "config_hash": hash_config(config),
         "report_file": pdf_path.name,
 
-        # Placeholders. Both describe the rendered PDF, which does not exist yet.
-        "page_count": 0,
-        "sections": [],
+        # Measured off the document that was written, never estimated (4.4).
+        "page_count": pages.count if pages else 0,
+        "sections": [dict(section) for section in pages.sections] if pages else [],
 
         "checkpoints_rendered": len(record.checkpoints),
         # Distinct checkpoints carrying at least one gap, not a count of gaps.

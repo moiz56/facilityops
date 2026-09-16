@@ -49,15 +49,65 @@ def setting(config: dict, section: str, key: str):
     return block[key]
 
 
+def units(config: dict) -> dict[str, str]:
+    """The configured unit for each measurement field, field -> unit.
+
+    Absent, empty or null is an empty mapping and not an error: printing no unit
+    is a valid configuration, and the one the engine ships with (decision 130).
+    A field with no entry is unitless, so the caller prints the bare number
+    rather than supplying a unit the record never recorded.
+
+    The values are validated rather than trusted, because a unit that arrived as
+    a number or a list would reach the page as whatever str() made of it.
+    """
+    block = config.get("units")
+    if block is None:
+        return {}
+    if not isinstance(block, dict):
+        raise ConfigError(f"'units' must be a mapping of field to unit, not {type(block).__name__}")
+
+    for field, unit in block.items():
+        if not isinstance(unit, str):
+            raise ConfigError(f"unit for '{field}' must be text, not {type(unit).__name__}")
+    return dict(block)
+
+
+def decimals(config: dict) -> dict[str, int]:
+    """The decimal places each measurement field prints to, field -> places.
+
+    Absent, empty or null is an empty mapping and not an error. A field with no
+    entry keeps measure()'s significant-figure rule; an entry is what pins a
+    column to one precision (decision 131).
+
+    A non-integer or negative value is refused rather than passed to a format
+    spec, where it would raise from inside a template with no field named.
+    `True` is an int to Python and would silently mean one decimal place, so
+    bools are refused too.
+    """
+    block = config.get("decimals")
+    if block is None:
+        return {}
+    if not isinstance(block, dict):
+        raise ConfigError(
+            f"'decimals' must be a mapping of field to decimal places, not {type(block).__name__}"
+        )
+
+    for field, places in block.items():
+        if isinstance(places, bool) or not isinstance(places, int) or places < 0:
+            raise ConfigError(
+                f"decimal places for '{field}' must be a whole number of 0 or more, not {places!r}"
+            )
+    return dict(block)
+
+
 _config = load_config(CONFIG_PATH)
 
-#: The compass directions and thermal marker, from config/report.yaml.
-_directions = setting(_config, "evidence", "directions")
-if not isinstance(_directions, list) or not _directions:
-    raise ConfigError(f"{CONFIG_PATH}: 'evidence.directions' must be a non-empty list")
-
-DIRECTIONS: tuple[str, ...] = tuple(_directions)
+#: The two modality markers a filename may carry. Thermal is always marked;
+#: RGB is marked on some routes and unmarked on others, so an unmarked file is
+#: RGB by default.
 THERMAL_SUFFIX: str = setting(_config, "evidence", "thermal_suffix")
+RGB_SUFFIX: str = setting(_config, "evidence", "rgb_suffix")
+
 PATH_PREFIX: str = setting(_config, "paths", "path_prefix")
 
 
@@ -67,32 +117,81 @@ class ResolvedImage:
 
     original_uri: str
     local_path: Path | None
-    direction: str | None
+    view: str | None        # what the filename called this view, or None if unlabelled
     is_thermal: bool
     exists: bool
     readable: bool
     reason: str | None
 
 
-def parse_filename(uri: str) -> tuple[str | None, bool]:
-    """Read the direction and the thermal flag out of an evidence filename.
+def parse_filename(uri: str, checkpoint_id: str | None = None) -> tuple[str | None, bool]:
+    """Read the view label and the thermal flag out of an evidence filename.
 
-    Filenames look like `checkpoint_1_N.jpg` or `checkpoint_1_N_thermal.jpg`.
-    Checkpoint ids contain underscores too, so the direction is the last
-    underscore-separated token; comparing whole tokens keeps N and NE apart.
+    A filename is `<checkpoint_id>[_<view>][_<modality>].<ext>`. The modality
+    marker comes off first, then the checkpoint id, and whatever is left is the
+    view label - taken as recorded, with no vocabulary imposed on it:
+
+        checkpoint_1_N.jpg          -> ("N", False)
+        checkpoint_1_NW_thermal.jpg -> ("NW", True)
+        ac_2_h120_rgb.jpg           -> ("h120", False)
+        a4_back_rgb.jpg             -> (None, False)     one unlabelled view
+        a4_back_thermal.jpg         -> (None, True)      its thermal counterpart
+
+    Both modalities of one view come back with the same label, which is what
+    lets build_view_grid pair them into a single cell. An unlabelled view
+    is None rather than "", so a checkpoint that photographed itself once has
+    one cell with no caption instead of one captioned with the empty string.
+
+    `checkpoint_id` is what the label is measured against. Without it the whole
+    stem is the label, since there is no way to tell which part of
+    `a4_back_rgb` is the id and which the view.
     """
     stem = PurePosixPath(uri).stem
 
     is_thermal = stem.endswith(THERMAL_SUFFIX)
     if is_thermal:
         stem = stem[: -len(THERMAL_SUFFIX)]
+    elif RGB_SUFFIX and stem.endswith(RGB_SUFFIX):
+        stem = stem[: -len(RGB_SUFFIX)]
 
-    token = stem.rsplit("_", 1)[-1].upper()
-    return (token if token in DIRECTIONS else None), is_thermal
+    if checkpoint_id and stem.startswith(checkpoint_id):
+        stem = stem[len(checkpoint_id):]
+
+    return (stem.strip("_") or None), is_thermal
+
+
+# The compass implementation this replaced, kept so 2.3's fixed behaviour can be
+# restored (decision 174). Restoring it also means restoring the DIRECTIONS
+# constant and the `evidence.directions` config key it reads, both removed with
+# it. It keeps the last underscore-separated token only if that token names a
+# compass point, so a filename from any route that does not use compass points
+# yields nothing at all and drops out of the grid entirely:
+#
+# _directions = setting(_config, "evidence", "directions")
+# if not isinstance(_directions, list) or not _directions:
+#     raise ConfigError(f"{CONFIG_PATH}: 'evidence.directions' must be a non-empty list")
+# DIRECTIONS: tuple[str, ...] = tuple(_directions)
+#
+# def parse_filename(uri: str) -> tuple[str | None, bool]:
+#     """Read the direction and the thermal flag out of an evidence filename.
+#
+#     Filenames look like `checkpoint_1_N.jpg` or `checkpoint_1_N_thermal.jpg`.
+#     Checkpoint ids contain underscores too, so the direction is the last
+#     underscore-separated token; comparing whole tokens keeps N and NE apart.
+#     """
+#     stem = PurePosixPath(uri).stem
+#
+#     is_thermal = stem.endswith(THERMAL_SUFFIX)
+#     if is_thermal:
+#         stem = stem[: -len(THERMAL_SUFFIX)]
+#
+#     token = stem.rsplit("_", 1)[-1].upper()
+#     return (token if token in DIRECTIONS else None), is_thermal
 
 
 def resolve_evidence(
-    uri: str, evidence_root: Path, path_prefix: str = PATH_PREFIX
+    uri: str, evidence_root: Path, path_prefix: str = PATH_PREFIX,
+    checkpoint_id: str | None = None,
 ) -> ResolvedImage:
     """Resolve one recorded evidence path against a local evidence root.
 
@@ -100,14 +199,17 @@ def resolve_evidence(
     `evidence_root`, and reports whether a usable image is there. Never raises:
     a path that does not resolve, or a file that is empty or will not decode,
     comes back with a reason so the report can show the gap.
+
+    `checkpoint_id` is passed to parse_filename, which measures the view label
+    against it. Resolution itself does not use it.
     """
-    direction, is_thermal = parse_filename(uri)
+    view, is_thermal = parse_filename(uri, checkpoint_id)
 
     relative = uri[len(path_prefix):] if uri.startswith(path_prefix) else uri
     local_path = evidence_root / relative.lstrip("/")
 
     def result(exists: bool, readable: bool, reason: str | None) -> ResolvedImage:
-        return ResolvedImage(uri, local_path, direction, is_thermal, exists, readable, reason)
+        return ResolvedImage(uri, local_path, view, is_thermal, exists, readable, reason)
 
     if not local_path.exists():
         return result(False, False, f"no file at {local_path}")
@@ -127,7 +229,10 @@ def resolve_checkpoint_images(
     checkpoint: Checkpoint, evidence_root: Path
 ) -> list[ResolvedImage]:
     """Resolve every evidence path one checkpoint recorded."""
-    return [resolve_evidence(uri, evidence_root) for uri in checkpoint.evidence_images]
+    return [
+        resolve_evidence(uri, evidence_root, checkpoint_id=checkpoint.checkpoint_id)
+        for uri in checkpoint.evidence_images
+    ]
 
 
 def resolve_record_images(

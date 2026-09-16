@@ -4,13 +4,20 @@ Three rules:
 
 1. Absent, null, "" and [] all mean the same thing: None, or () for a list.
 2. Nothing is converted. A field of the wrong type is left unset and recorded as
-   a FieldAnomaly, so a confidence written as the string "0.94" never reaches
-   the report as a number.
+   a FieldAnomaly
 3. Only a broken file raises. RecordParseError is for a file that cannot be
    read, is not JSON, is not a JSON object, or has no run_id (the output files
    are named after it). Everything else loads, carrying its problems in
    Record.anomalies, so a bad record still produces a report saying what is
    wrong with it.
+
+Every builder below reads one object and takes the same two extra arguments.
+`item` (called `where` where the entry has no id of its own yet) is who an
+anomaly belongs to: a checkpoint_id, a position like "findings[2]", or
+RUN_LEVEL for the record itself. `anomalies` is the one list a whole record is
+read into; builders append to it as they go and it is handed to
+Record.anomalies at the end. Nothing is raised and nothing is collected on the
+way back up.
 """
 
 from __future__ import annotations
@@ -32,7 +39,7 @@ logger = logging.getLogger(__name__)
 #: Owner for an anomaly in a run-level field rather than a checkpoint's.
 RUN_LEVEL = "__run__"
 
-#: The declared counts. Claims about the arrays, cross-checked later in derive.py.
+#: The declared counts. Claims about the arrays, never corrected here:
 COUNT_FIELDS = (
     "total_required_checkpoints", "total_completed_checkpoints", "passed_checkpoints",
     "failed_checkpoints", "missed_checkpoints", "warned_checkpoints", "finding_count",
@@ -40,6 +47,8 @@ COUNT_FIELDS = (
 
 #: Collects anomalies while one record is read.
 Anomalies = list[FieldAnomaly]
+
+
 class RecordParseError(Exception):
     """The record cannot be loaded at all. The message names the file and the problem."""
 
@@ -50,7 +59,7 @@ class RecordParseError(Exception):
 
 
 def parse_offset_timestamp(text: str) -> datetime | None:
-    """Parse '2026-07-28T14:41:20-0700'. Returns None if it has no UTC offset."""
+    """Parse for example '2026-07-28T14:41:20-0700'. Returns None if it has no UTC offset."""
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError:
@@ -105,8 +114,9 @@ def _get(
     if key not in data or _blank(data[key]):
         if required:
             anomalies.append(FieldAnomaly(
-            item_id=item, field_name=key, problem="required, but absent",
-        ))
+                item_id=item, field_name=key, problem="required, but absent",
+                kind="absent",
+            ))
         return None
 
     value = data[key]
@@ -128,8 +138,10 @@ def _get(
 
     if isinstance(value, str):
         return value.strip()
-    # A bool can only reach here when bool was asked for, and float never is.
     if float in expected:
+        # An int where a float was asked for is widened, the one exception to
+        # rule 2: 20 and 20.0 are the same reading written two ways. A bool
+        # cannot reach here, having been refused above unless it was asked for.
         return float(value)
     return value
 
@@ -350,6 +362,7 @@ def _finding(data: Mapping[str, Any], where: str, anomalies: Anomalies) -> Findi
     if finding_id is None:
         anomalies.append(FieldAnomaly(
             item_id=where, field_name="entry", problem="dropped: no finding_id",
+            kind="dropped",
         ))
         return None
 
@@ -380,6 +393,7 @@ def _checkpoint(data: Mapping[str, Any], index: int, anomalies: Anomalies) -> Ch
     if item is None:
         anomalies.append(FieldAnomaly(
             item_id=where, field_name="entry", problem="dropped: no checkpoint_id",
+            kind="dropped",
         ))
         return None
 
@@ -421,6 +435,7 @@ def _alert(data: Mapping[str, Any], index: int, anomalies: Anomalies) -> SensorA
     if code is None:
         anomalies.append(FieldAnomaly(
             item_id=where, field_name="entry", problem="dropped: no code",
+            kind="dropped",
         ))
         return None
 
@@ -464,7 +479,7 @@ def _event(data: Mapping[str, Any], index: int, anomalies: Anomalies) -> Event |
     if event_id is None or event_type is None:
         anomalies.append(FieldAnomaly(
             item_id=where, field_name="entry",
-            problem="dropped: no event_id or event_type",
+            problem="dropped: no event_id or event_type", kind="dropped",
         ))
         return None
 
@@ -491,9 +506,9 @@ def _record_duplicate_ids(checkpoints: Sequence[Checkpoint], anomalies: Anomalie
             anomalies.append(FieldAnomaly(
                 item_id=item, field_name="checkpoint_id",
                 problem=f"used by {count} checkpoints in one run; all are kept",
+                kind="duplicate_id",
             ))
-
-
+            
 # --- the entry point --------------------------------------------------------
 
 

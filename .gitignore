@@ -7,6 +7,9 @@ venv
 /output/
 /tests/data
 
+# rendered by the acceptance tests
+/tests/output/
+
 # python bytecode
 __pycache__/
 *.py[cod]

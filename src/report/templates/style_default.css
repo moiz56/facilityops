@@ -1,0 +1,804 @@
+/* Report stylesheet.
+ *
+ * Page-break control lives here and nowhere else (5.5). The page size, the
+ * brand colour, the running header and the footer text are injected by
+ * render.py from config/report.yaml, so they are the only values this file
+ * does not set.
+ *
+ * Read on paper by facility managers and auditors, and filed as a workpaper.
+ * Restrained and corporate: one navy, one charcoal, a grey scale for structure,
+ * and three status colours used only where a word already says the same thing.
+ * Nothing is distinguished by colour alone, because this document gets
+ * photocopied.
+ */
+
+:root {
+  /* --primary-colour is injected from branding.primary_colour (5.7). */
+  --ink: #1b2330;
+  --muted: #5b6472;
+  --rule: #d5dae1;
+  --rule-strong: #93a0b0;
+  --panel: #f5f7f9;
+  --panel-head: #eaeef3;
+  --pass: #1a6b34;
+  --fail: #9b1c1c;
+  --warn: #8a5a00;
+  --info: #33506b;
+
+  /* Arial where it exists; Liberation Sans is metric-compatible and is what a
+   * Linux container will have (TA-08). */
+  --sans: Arial, "Liberation Sans", Helvetica, sans-serif;
+}
+
+/* --- the page ---------------------------------------------------------- */
+
+@page {
+  /* size comes from report.page_size */
+  margin: 20mm 16mm 20mm 16mm;
+
+  /* The running head names the document and the run it belongs to, so a page
+   * separated from the file still says what it is. Content comes from
+   * render.py; a rule under it separates it from the body. */
+  @top-left {
+    font-family: var(--sans);
+    font-size: 7pt;
+    color: var(--muted);
+    vertical-align: bottom;
+    padding-bottom: 2mm;
+    border-bottom: 0.5pt solid var(--rule);
+  }
+
+  @top-right {
+    font-family: var(--sans);
+    font-size: 7pt;
+    color: var(--muted);
+    vertical-align: bottom;
+    padding-bottom: 2mm;
+    border-bottom: 0.5pt solid var(--rule);
+    white-space: nowrap;
+  }
+
+  /* content comes from render.py: branding.footer_text and the four
+   * provenance facts 5.6 requires on every page. */
+  @bottom-left {
+    font-family: var(--sans);
+    font-size: 6.5pt;
+    color: var(--muted);
+    vertical-align: top;
+    padding-top: 2mm;
+    border-top: 0.5pt solid var(--rule);
+  }
+
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: var(--sans);
+    font-size: 6.5pt;
+    color: var(--muted);
+    vertical-align: top;
+    padding-top: 2mm;
+    border-top: 0.5pt solid var(--rule);
+    white-space: nowrap;
+  }
+}
+
+/* --- type -------------------------------------------------------------- */
+
+body {
+  font-family: var(--sans);
+  font-size: 9.5pt;
+  line-height: 1.45;
+  color: var(--ink);
+  margin: 0;
+  counter-reset: section;
+}
+
+h1, h2, h3, h4, h5 {
+  color: var(--primary-colour);
+  font-weight: bold;
+}
+
+h1 {
+  font-size: 16pt;
+  line-height: 1.2;
+  margin: 0 0 2mm;
+  letter-spacing: -0.01em;
+}
+
+/* A section heading, numbered by counter so a reader can cite a section and
+ * the templates carry no numbering of their own. A rule under it, and a short
+ * heavy rule above, so the eye finds a section boundary on a dense page. */
+h2 {
+  font-size: 14pt;
+  margin: 0 0 5mm;
+  padding-bottom: 2mm;
+  border-bottom: 1.2pt solid var(--primary-colour);
+}
+
+.section { counter-increment: section; }
+.section > h2::before {
+  content: counter(section) ".";
+  color: var(--rule-strong);
+  margin-right: 2.5mm;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The cover is the title page, not a numbered section, and "Headline counts"
+ * inside it is a sub-heading rather than a section of its own. */
+.cover { counter-increment: none; }
+.cover > h2::before { content: none; }
+
+h3 {
+  font-size: 11pt;
+  margin: 8mm 0 2.5mm;
+}
+
+h4 { font-size: 10pt; margin: 0 0 2mm; }
+
+h5 {
+  font-size: 8pt;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 5mm 0 1.5mm;
+  padding-bottom: 1mm;
+  border-bottom: 0.5pt solid var(--rule);
+}
+
+p { margin: 0 0 3mm; }
+
+/* Intent-setting text under a heading. */
+.lede {
+  margin: 0 0 5mm;
+  color: var(--muted);
+  max-width: 155mm;
+}
+
+/* --- page breaks (5.5) -------------------------------------------------- */
+
+.detail-table     { break-inside: avoid; }
+.zone-head        { break-after: avoid; }
+img               { break-inside: avoid; }
+
+/* 5.5 lists `.checkpoint-block` and `.evidence-grid` as break-inside: avoid,
+ * and its own next paragraph says a block of sixteen images will not fit one
+ * page and must break between grid rows with a repeated heading. Both cannot
+ * hold at once, and `avoid` is the half that does damage: a block shorter than
+ * a page is pushed whole to the next one, stranding a heading above a blank
+ * page, and a grid that cannot break can never repeat its head on the
+ * continuation the same paragraph asks for.
+ *
+ * So both break freely and the finer rules do the work. TA-06 is what this has
+ * to satisfy, and it asks that no row, heading or grid cell be split - not
+ * that a checkpoint stay whole. Recorded as decision 109. */
+.checkpoint-block { break-inside: auto; }
+.evidence-grid    { break-inside: auto; }
+
+/* Each top-level section starts its own page, so 4.4's section page ranges
+ * describe whole pages rather than positions part-way down one. */
+.section { break-before: page; }
+.section:first-of-type { break-before: auto; }
+
+/* A heading stranded at the foot of a page helps nobody. */
+h2, h3 { break-after: avoid; }
+
+/* --- tables ------------------------------------------------------------- */
+/*
+ * Two kinds. A .detail-table is short, stays whole on one page (5.5), and
+ * reads as an information panel: a shaded label column against a white value
+ * column. A .data-table is a list that may run past a page end, so it breaks
+ * and repeats its header rather than being pushed whole onto the next page.
+ */
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 4mm;
+}
+
+.data-table thead { display: table-header-group; }
+.data-table tr { break-inside: avoid; }
+
+/* A filled header band, which is what separates a workpaper table from a list
+ * with a line over it. White on navy survives photocopying; the uppercase
+ * tracking keeps it legible at 7pt. */
+thead th {
+  font-size: 7pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #fff;
+  background: var(--primary-colour);
+  padding: 3.5pt 6pt;
+  border-bottom: none;
+}
+
+td, tbody th {
+  border-bottom: 0.4pt solid var(--rule);
+  vertical-align: top;
+}
+
+th, td {
+  text-align: left;
+  padding: 3.5pt 6pt;
+}
+
+/* Alternating rows, a shade barely there. Enough to follow a row across nine
+ * columns, not enough to compete with the status colours. */
+.data-table > tbody > tr:nth-child(even) { background: var(--panel); }
+
+/* The findings table puts one tbody round each finding's two rows, so it
+ * alternates by finding rather than by row. */
+.findings-table > tbody > tr:nth-child(even) { background: none; }
+.findings-table > tbody:nth-of-type(even) { background: var(--panel); }
+
+/* The label column of a detail panel. */
+tbody th {
+  font-weight: normal;
+  color: var(--muted);
+  width: 34%;
+  background: var(--panel);
+}
+
+.detail-table {
+  border: 0.5pt solid var(--rule);
+}
+
+/* Figures line up on their last digit, which is how a column of counts is
+ * read. Long identifiers break rather than overflow their cell (2.4);
+ * break-word rather than anywhere, since anywhere also shrinks a column's
+ * minimum width and splits ordinary checkpoint ids across lines. */
+.figure { text-align: right; font-variant-numeric: tabular-nums; }
+td, th { overflow-wrap: break-word; }
+
+/* A note explaining a mark used in the table above it. */
+.table-note {
+  font-size: 8pt;
+  color: var(--muted);
+  margin: -2mm 0 5mm;
+}
+
+/* --- status badges ------------------------------------------------------ */
+/*
+ * A filled badge, because a verdict is the one thing on the page a reader
+ * looks for first. The word is always inside it, so the badge still says what
+ * it says in a photocopy where the fill is grey. An enum 2.2 does not list
+ * renders in the neutral fill, never dressed as one that is listed (11).
+ */
+
+.badge {
+  display: inline-block;
+  padding: 3pt 10pt;
+  border-radius: 2pt;
+  background: var(--muted);
+  color: #fff;
+  font-weight: bold;
+  font-size: 11pt;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.badge-pass  { background: var(--pass); }
+.badge-fail  { background: var(--fail); }
+.badge-warn  { background: var(--warn); }
+.badge-info  { background: var(--info); }
+.badge-other { background: #55606e; }
+
+/* A badge inside a table cell. Lighter than the cover's verdict badge, which
+ * is the one thing on its page; here a dozen of them share a column. */
+.badge-small {
+  padding: 1.5pt 4pt;
+  min-width: 15mm;
+  text-align: center;
+  font-size: 6.5pt;
+  letter-spacing: 0.06em;
+}
+
+/* --- saying what is not there ------------------------------------------- */
+/*
+ * 0 and 3.6: a gap is stated in words, in the place the missing thing would
+ * have been. Colour only ever repeats what the words already say.
+ */
+
+.absent { color: #9b1c1c; }
+.absent-strong { color: #9b1c1c; font-weight: bold; }
+
+/* A row whose declared figure and computed figure do not match. The row is
+ * marked with an asterisk in the template as well as coloured here, so the
+ * conflict survives a monochrome print. */
+.count-disagrees th,
+.count-disagrees td {
+  color: #9b1c1c;
+  font-weight: bold;
+}
+
+.conflicts {
+  margin: 0 0 4mm;
+  padding-left: 4.5mm;
+}
+
+.conflicts li {
+  margin-bottom: 1.5mm;
+  color: #9b1c1c;
+}
+
+/* --- the cover ---------------------------------------------------------- */
+
+.cover-logo {
+  max-height: 18mm;
+  margin-bottom: 12mm;
+}
+
+.cover-facility-id {
+  font-size: 9.5pt;
+  color: #555;
+  margin: 0 0 9mm;
+}
+
+.cover-verdict { margin: 0 0 11mm; }
+
+.cover-run-table { margin-bottom: 11mm; }
+
+.cover-counts tbody th { width: 62%; }
+.cover-counts .count-figure { font-weight: bold; font-size: 10.5pt; }
+
+/* The record's own claim, printed beside a computed figure it disagrees with.
+ * 2.9 forbids showing one without the other. */
+.count-declared {
+  color: #9b1c1c;
+  font-weight: normal;
+  font-size: 8.5pt;
+  white-space: nowrap;
+}
+
+/* --- the coverage page -------------------------------------------------- */
+
+.reconciliation { margin-bottom: 2mm; }
+.reconciliation tbody th { width: 46%; }
+.reconciliation .figure { width: 27%; }
+
+/* A field name quoted inside running text. */
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 0.92em;
+}
+
+/* --- the findings summary ----------------------------------------------- */
+
+.findings-count { margin: 0 0 4mm; }
+
+/* Room for the section to breathe between one block and the next. The first
+ * heading sits closer, since the count line above it is a single sentence. */
+.findings h3 { margin-top: 11mm; }
+.findings h3:first-of-type { margin-top: 8mm; }
+
+/* What a block says when it holds nothing. Quiet, because an absence stated is
+ * not a finding - but stated, because a blank says nothing at all (0). */
+.absent-note { color: #555; }
+
+/* Fixed layout, so these widths are what the columns get. Left to itself the
+ * table gives a long token like sensor_threshold_warning whatever width it
+ * asks for and starves the columns beside it.
+ *
+ * Every value in the index row fits its column on one line: a checkpoint id as
+ * long as home_docking_station, a feature as long as
+ * sensor_threshold_warning, and a full timestamp with its offset. */
+.findings-table { table-layout: fixed; }
+
+.findings-table th:nth-child(1) { width: 10%; }
+.findings-table th:nth-child(2) { width: 22%; }
+.findings-table th:nth-child(3) { width: 25%; }
+.findings-table th:nth-child(4) { width: 15%; }
+.findings-table th:nth-child(5) { width: 28%; }
+
+/* Each finding is a tbody of two rows: the table row, and a continuation row
+ * holding the recommended action, the position and the long identifier 2.4
+ * warns about. Keeping the pair together is what stops TA-06 finding a finding
+ * split across a page break. */
+.finding { break-inside: avoid; }
+
+/* One finding is one block. No rules inside it, a rule and clear space above
+ * the next, so the eye reads three entries and not six rows. */
+.finding td { border-bottom: none; }
+
+.finding + .finding > tr:first-child > td {
+  border-top: 0.4pt solid #d4d4d4;
+  padding-top: 6pt;
+}
+
+.findings-table { border-bottom: 0.4pt solid #d4d4d4; }
+
+.finding > tr:first-child > td { padding-bottom: 2pt; }
+
+.finding-detail td {
+  padding-top: 0;
+  padding-bottom: 6pt;
+  font-size: 8pt;
+  color: #444;
+}
+
+/* A hanging indent: the label sits in the margin the line reserves for it, so
+ * a value that runs to a second line stays aligned under the first rather than
+ * dropping back under its own label. */
+.finding-line {
+  display: block;
+  margin-top: 1.2mm;
+  padding-left: 26mm;
+}
+
+/* The label that names what a line of the detail block holds. Set apart from
+ * the value so a reader scans the labels, not the sentences. */
+.finding-label {
+  display: inline-block;
+  width: 26mm;
+  margin-left: -26mm;
+  vertical-align: top;
+  font-size: 6.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #777;
+}
+
+/* The colon-delimited finding_id of 2.4. Monospaced because it is an
+ * identifier to be copied rather than read, and given the width of the row so
+ * it wraps instead of overflowing a column. */
+.finding-id {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 7pt;
+  color: #666;
+}
+
+.finding-zone {
+  display: block;
+  font-size: 8pt;
+  color: #666;
+}
+
+
+/* --- the sensor alerts summary ------------------------------------------ */
+/*
+ * 3.5 wants criticals told apart. The badge at the head of each block already
+ * carries the colour; the rule down the left of the critical table repeats it
+ * for the rows, so a reader scanning the page sees which block is which
+ * without reading a word. Colour only ever repeats what the words say.
+ */
+
+.alerts-table { font-size: 8pt; }
+
+/* The rule marking a critical block stands clear of the text it marks: the
+ * leading cell is indented to make room rather than printing against it. Only
+ * that cell carries the rule, and the header is indented to match so the
+ * column still lines up under its own heading. */
+.alerts-fail td { border-left: 2pt solid #9b1c1c; padding-left: 5pt; }
+.alerts-fail td + td { border-left: none; padding-left: 0; }
+.alerts-fail thead th:first-child { padding-left: 5pt; }
+
+/* The severity tallies at the head of the section (3.5). A badge and its count
+ * read as one unit, so the gap between two tallies is wider than the gap
+ * inside one. */
+.alerts-count { margin: 0 0 5mm; }
+
+.alerts-tally {
+  display: inline-block;
+  margin-right: 11mm;
+  white-space: nowrap;
+}
+
+.alerts-tally .badge-small { margin-right: 3pt; }
+
+.alerts-total {
+  font-weight: bold;
+  font-size: 10pt;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The machine code beside an alert's label. 2.5 keeps the set open, so the
+ * code is printed as recorded rather than translated. It sits on a tight line
+ * under the label rather than a full one, so a run with twenty alerts still
+ * reads as a list instead of as twenty blocks. */
+.alert-code {
+  display: block;
+  font-size: 7pt;
+  line-height: 1.2;
+  color: #666;
+}
+
+/* A block heading belongs to the table under it, so it sits nearer that than
+ * the block it follows. The first one needs no gap: the lede is above it. */
+/* 2.5's severities are lowercase and print exactly as recorded. Capitalising
+ * the heading is a glyph choice, like the badge colours: the value in the
+ * document is untouched and an unlisted severity still heads its own block
+ * under its own name (11). */
+.alerts h3 { margin: 9mm 0 2.5mm; text-transform: capitalize; }
+.alerts h3:first-of-type { margin-top: 0; }
+
+/* --- the zone telemetry summary ----------------------------------------- */
+/*
+ * 3.4's table. Min, mean and max each get a column, grouped under the
+ * measurement they belong to, so a reader can follow one figure down the page.
+ * A run can carry any number of zones, so the header repeats on each page and
+ * no row splits across a break (.data-table above sets both).
+ */
+
+.zone-table {
+  table-layout: fixed;
+  font-size: 8pt;
+}
+
+/* The name column holds a checkpoint-length zone id without breaking it
+ * mid-word, and the count columns hold their own headers. What is left is
+ * split evenly across the nine figures. */
+.zone-table col.zone-name   { width: 20%; }
+.zone-table col.zone-count  { width: 10%; }
+.zone-table col.zone-figure { width: 7%; }
+
+/* Twelve columns cannot afford the tracking the other tables' headers carry. */
+.zone-table thead th { letter-spacing: 0.03em; }
+
+/* Room to breathe: twelve columns of figures read as a wall without it. */
+.zone-table th,
+.zone-table td {
+  padding-top: 5pt;
+  padding-bottom: 5pt;
+}
+
+.zone-table .figure { padding-right: 4pt; }
+
+/* A light rule where one measurement ends and the next begins, so the three
+ * figures of a group read together without the group needing a box. */
+.zone-group {
+  border-left: 0.4pt solid #e0e0e0;
+  padding-left: 6pt;
+}
+
+/* The measurement name, centred over the three figures it covers. */
+.zone-measure {
+  text-align: center;
+  border-bottom: none;
+  padding-bottom: 1pt;
+}
+
+/* The second header line names the three figures. The rule goes under the
+ * pair, not between them: the two rows are one heading. */
+.zone-subhead {
+  border-bottom: 1pt solid var(--primary-colour);
+  font-size: 6.5pt;
+  letter-spacing: 0.04em;
+  color: #777;
+  padding-top: 1pt;
+}
+
+/* A unit is written as it is recorded. Uppercasing the header turned the g of
+ * vibration RMS into a G, which is a different thing. */
+.zone-table .unit { text-transform: none; }
+
+/* What a measurement says instead of figures, across the three columns it
+ * would have filled. */
+.zone-absent {
+  text-align: center;
+  font-size: 7.5pt;
+}
+
+/* How many samples actually carried the value, where that is not all of them. */
+.zone-used {
+  display: block;
+  font-size: 6pt;
+  color: #777;
+  white-space: nowrap;
+}
+
+
+/* --- the per-checkpoint section (3.2) ----------------------------------- */
+/*
+ * A checkpoint carrying sixteen images does not fit a page, and 5.5 says where
+ * it may break: between rows of the evidence grid, never inside a cell, and
+ * the continuation carries a repeated heading. The grid is a table for exactly
+ * that reason - a table head repeats itself on a continuation, which no grid
+ * of boxes does.
+ */
+
+.checkpoint-block { margin: 0 0 9mm; }
+
+/* The page break goes on the zone header, not on the block. Put it on the
+ * block and a forced break outranks the header's own break-after: avoid, which
+ * leaves the header stranded at the foot of the previous page, above the group
+ * it heads. On the header, the first block of a zone follows it on the same
+ * page and only a second or later block in the same zone needs its own break.
+ *
+ * The first header stays put so the section heading is not left alone. */
+.zone-head { break-before: page; }
+.checkpoints > .zone-head:first-of-type { break-before: avoid; }
+.checkpoint-block + .checkpoint-block { break-before: page; }
+
+/* A zone header belongs to the group under it (5.5 keeps it there). A left
+ * rule rather than an underline, so it reads as a band over the block rather
+ * than a third level of section heading. */
+.zone-head {
+  font-size: 10pt;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--primary-colour);
+  background: var(--panel-head);
+  border-left: 2.5pt solid var(--primary-colour);
+  margin: 0 0 4mm;
+  padding: 1.8mm 3mm;
+}
+
+h4.checkpoint-head {
+  font-size: 12pt;
+  margin: 0 0 2.5mm;
+}
+
+.checkpoint-id,
+.checkpoint-seq {
+  font-weight: normal;
+  font-size: 8pt;
+  color: var(--muted);
+  margin-left: 3mm;
+}
+
+/* The two badges 3.2 keeps apart, side by side and never collapsed. */
+.badge-pair { margin: 0 0 4mm; }
+.badge-pair .badge-small { margin-right: 3mm; min-width: 22mm; }
+
+/* Two label/value pairs to a row. */
+.detail-pairs th { width: 17%; }
+.detail-pairs td { width: 33%; }
+
+/* --- the evidence grid --------------------------------------------------- */
+
+.evidence-grid { table-layout: fixed; margin-top: 3mm; }
+
+.evidence-grid thead { display: table-header-group; }
+.evidence-grid tr { break-inside: avoid; }
+
+.evidence-grid thead th {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 7pt;
+}
+
+.evidence-grid td.evidence-cell {
+  width: 25%;
+  padding: 2mm 2mm 3mm 0;
+  text-align: center;
+  vertical-align: top;
+  border-bottom: none;
+  background: none;
+}
+
+/* The view label reads first, so a reader finds a named view without
+ * counting cells across. */
+.view-label {
+  display: block;
+  font-weight: bold;
+  font-size: 8pt;
+  margin-bottom: 1mm;
+}
+
+/* Every slot is the same size whatever shape the image is. The RGB frames in
+ * this data are portrait and the thermal ones landscape, so left to themselves
+ * the cells come out ragged and no two rows line up. A fixed box with
+ * object-fit: contain letterboxes each image instead of cropping or stretching
+ * it - nothing is hidden and no proportion is altered, which matters when the
+ * picture is the evidence. */
+.evidence-rgb,
+.evidence-thermal {
+  display: block;
+  width: 100%;
+  object-fit: contain;
+  margin: 0 0 1mm;
+}
+
+.evidence-rgb { height: 35mm; }
+.evidence-thermal { height: 20mm; }
+
+.modality {
+  display: block;
+  font-size: 7pt;
+  color: var(--muted);
+  margin-bottom: 0.5mm;
+}
+
+/* 3.2 asks for a placeholder of the same size as the picture it stands in for,
+ * so each matches its slot exactly. A minimum rather than a fixed height: the
+ * reason a file could not be used has to stay readable (3.6), and a long one
+ * grows the box rather than being clipped out of the document. */
+.image-absent,
+.thermal-absent {
+  display: block;
+  box-sizing: border-box;
+  font-size: 7.5pt;
+  line-height: 1.35;
+  color: var(--muted);
+  border: 0.4pt dashed var(--rule-strong);
+  margin-bottom: 1mm;
+}
+
+.image-absent { min-height: 35mm; padding: 15mm 1.5mm 2mm; }
+.thermal-absent { min-height: 20mm; padding: 8mm 1.5mm 2mm; }
+
+/* --- the sensor table ---------------------------------------------------- */
+
+.sensor-table th { font-weight: normal; }
+
+.sensor-block-head th {
+  font-weight: bold;
+  color: var(--primary-colour);
+  background: var(--panel-head);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 7.5pt;
+  width: auto;
+}
+
+/* --- sensor warnings and operator notes ---------------------------------- */
+
+.warning-list {
+  margin: 0 0 3mm;
+  padding-left: 0;
+  list-style: none;
+}
+
+.warning-list li {
+  margin-bottom: 1.5mm;
+  padding: 1.5mm 3mm;
+  background: var(--panel);
+  border-left: 2pt solid var(--warn);
+}
+
+.warning-list .badge-small { margin-right: 2mm; }
+
+/* 2.9: notes are printed verbatim under their own label and never read as an
+ * inspection conclusion. Set apart so nobody mistakes it for the report's own
+ * narrative. */
+.operator-notes {
+  padding: 2.5mm 3mm;
+  background: var(--panel);
+  border-left: 2pt solid var(--rule-strong);
+  color: var(--ink);
+}
+
+/* --- the run summary table (3.1) ---------------------------------------- */
+/*
+ * Nine columns across 178mm, so the widths are declared rather than left to
+ * the content: a long checkpoint id would otherwise take the space the badges
+ * and counts need. A run can carry sixty rows, so the header repeats and no
+ * row splits (.data-table above sets both).
+ */
+
+.summary-table {
+  table-layout: fixed;
+  font-size: 7.5pt;
+}
+
+.summary-table .badge-small { min-width: 0; padding-left: 3pt; padding-right: 3pt; }
+
+/* The shared header style spaces its capitals out, which is right for a wide
+ * column and wrong for a narrow one - it broke "THERMAL" and "FINDINGS" across
+ * two lines. This table sets its own. */
+.summary-table thead th {
+  font-size: 6.2pt;
+  letter-spacing: 0.02em;
+}
+
+/* Widths add to 177mm of the 178mm available, and each allows for the 6pt of
+ * cell padding either side as well as its longest real content: the status
+ * badge is the widest fixed thing on the row, "FINDINGS" is the widest header,
+ * and a zone name has to sit on one line or it breaks mid-word. */
+.col-seq     { width: 7mm; }
+.col-name    { width: 32mm; }
+.col-zone    { width: 31mm; }
+.col-status  { width: 22mm; }
+.col-result  { width: 14mm; }
+.col-rgb     { width: 13mm; }
+.col-thermal { width: 17mm; }
+.col-sensor  { width: 22mm; }
+.col-count   { width: 18mm; }
+
+/* The id under the name, for the same reason the checkpoint heading carries
+ * both: the name is what a reader recognises, the id is what they search. */
+.summary-id {
+  display: block;
+  font-size: 6.5pt;
+  color: #666;
+}

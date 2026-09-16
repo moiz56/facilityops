@@ -1,8 +1,8 @@
 """Build the evidence grid, and size an image down before it is embedded.
 
-Two jobs, kept apart: pairing an image with its direction, and making it small
-enough to put in a PDF. 5.5 puts the resize here rather than in a template, and
-5.7 puts the limit in config rather than in this file.
+Two jobs, kept apart: pairing an image with the view it belongs to, and making
+it small enough to put in a PDF. 5.5 puts the resize here rather than in a
+template, and 5.7 puts the limit in config rather than in this file.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from common.paths import CONFIG_PATH, DIRECTIONS, ResolvedImage, load_config, setting
+from common.paths import CONFIG_PATH, ResolvedImage, load_config, setting
 
 logger = logging.getLogger("report.images")
 
@@ -25,48 +25,99 @@ _config = load_config(CONFIG_PATH)
 #: this limit exists to stop.
 MAX_IMAGE_DIMENSION: int = setting(_config, "report", "max_image_dimension")
 
-#: How many cells the evidence grid puts on a row (3.2, 5.7).
+#: The most cells the evidence grid puts on a row. A checkpoint that recorded
+#: fewer views uses fewer, so the grid fans out rather than padding (3.2, 5.7).
 GRID_COLUMNS: int = setting(_config, "evidence", "grid_columns")
 
 
 @dataclass(frozen=True)
-class DirectionCell:
-    """One cell of the evidence grid.
+class ViewCell:
+    """One cell of the evidence grid: one view, in up to two modalities.
+
+    `view` is what the filename called this view - `N` on a compass route,
+    `h120` on one that records headings, None where a checkpoint captured a
+    single view and labelled it nothing.
 
     `rgb` and `thermal` are None when the checkpoint recorded no image for that
-    direction and modality. An image that is present but unusable is still here,
+    view and modality. An image that is present but unusable is still here,
     carrying its reason, so the cell can say what went wrong instead of looking
     like nothing was captured.
     """
 
-    direction: str
+    view: str | None
     rgb: ResolvedImage | None
     thermal: ResolvedImage | None
 
 
-def build_direction_grid(images: list[ResolvedImage]) -> list[DirectionCell]:
-    """Return one cell per compass direction, in fixed order.
+def build_view_grid(images: list[ResolvedImage]) -> list[ViewCell]:
+    """Return one cell per view the checkpoint recorded, in recorded order.
 
-    Always returns a cell for every direction, whether or not an image exists
-    for it, so the grid keeps its shape and a missing direction shows a
-    placeholder rather than shifting the others along.
+    A cell pairs the RGB and the thermal carrying the same view label, so a pair
+    draws as one picture above another rather than as two unrelated cells. How
+    many cells a checkpoint gets is therefore how many views it recorded: eight
+    on a compass route that photographed all eight, three where it recorded
+    `h000`, `h120` and `h240`, one where it took a single unlabelled picture.
 
-    Images whose filename gave no direction are left out. If two images claim
-    the same direction and modality, the first one wins.
+    Nothing is expected and nothing is invented. Without a fixed vocabulary
+    there is no way to know a view was meant to exist, so a view nobody
+    photographed has no cell rather than an empty one. What was captured is
+    still checked against what the record claimed: an empty `evidence_images`
+    is NO_EVIDENCE, a path that does not resolve is MISSING_IMAGE, and a
+    recorded count that disagrees is COUNT_MISMATCH.
+
+    Views are paired without regard to case, so `checkpoint_1_n.jpg` shares a
+    cell with `checkpoint_1_N_thermal.jpg` rather than opening a second cell and
+    a MISSING_THERMAL that is really a spelling (decision 13). The label prints
+    as the first file spelled it; only the pairing ignores case.
+
+    If two images claim the same view and modality, the first one wins.
     """
+    labels: dict[str, str | None] = {}          # key -> the spelling to print
     rgb: dict[str, ResolvedImage] = {}
     thermal: dict[str, ResolvedImage] = {}
 
     for image in images:
-        if image.direction is None:
-            continue
+        key = image.view.casefold() if image.view else ""
+        labels.setdefault(key, image.view)
         found = thermal if image.is_thermal else rgb
-        found.setdefault(image.direction, image)
+        found.setdefault(key, image)
 
     return [
-        DirectionCell(direction=direction, rgb=rgb.get(direction), thermal=thermal.get(direction))
-        for direction in DIRECTIONS
+        ViewCell(view=label, rgb=rgb.get(key), thermal=thermal.get(key))
+        for key, label in labels.items()
     ]
+
+
+# The fixed-width implementation this replaced, kept so 2.3's eight-cell grid can
+# be restored alongside the parse_filename and the DIRECTIONS constant it depends
+# on (decision 174). It returns exactly len(DIRECTIONS) cells whatever the
+# checkpoint recorded, which is what gives a compass route its "Image not
+# captured" placeholders - and what leaves every cell empty on a route that does
+# not name its views that way:
+#
+# def build_view_grid(images: list[ResolvedImage]) -> list[ViewCell]:
+#     """Return one cell per compass direction, in fixed order.
+#
+#     Always returns a cell for every direction, whether or not an image exists
+#     for it, so the grid keeps its shape and a missing direction shows a
+#     placeholder rather than shifting the others along.
+#
+#     Images whose filename gave no direction are left out. If two images claim
+#     the same direction and modality, the first one wins.
+#     """
+#     rgb: dict[str, ResolvedImage] = {}
+#     thermal: dict[str, ResolvedImage] = {}
+#
+#     for image in images:
+#         if image.direction is None:
+#             continue
+#         found = thermal if image.is_thermal else rgb
+#         found.setdefault(image.direction, image)
+#
+#     return [
+#         ViewCell(direction=direction, rgb=rgb.get(direction), thermal=thermal.get(direction))
+#         for direction in DIRECTIONS
+#     ]
 
 
 # --- sizing an image down before it is embedded (5.5) ------------------------

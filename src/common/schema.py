@@ -1,15 +1,42 @@
-"""The shape of a run record.
+"""The in-memory shape of one run.json record.
 
-Shape only: no properties, no methods, no logging. Reading the data is
-loader.py's job, rewriting evidence paths is paths.py's, and deciding what
-counts as a gap is report/gaps.py's.
+Record is the whole file. Everything else hangs off it, [] marking a tuple of
+many rather than one:
 
-Two rules throughout:
+    Record
+     |- checkpoints[]           Checkpoint
+     |   |- coordinates         Pose
+     |   |- detections[]        Finding
+     |   `- sensor              SensorBlock
+     |       |- accelerometer   Accelerometer
+     |       |- environment     Environment
+     |       |- particulate     Particulate
+     |       |- warnings[]      SensorWarning
+     |       `- raw             RawSensor
+     |- findings[]              Finding
+     |   `- coordinates         Pose
+     |- sensor_alerts[]         SensorAlert
+     |   `- coordinates         Point2D
+     |- sensor_samples[]        SensorSample
+     |   |- coordinates         Point2D
+     |   `- sensor              SampleSensor
+     |       |- accelerometer   Accelerometer
+     |       |- environment     Environment
+     |       `- particulate     Particulate
+     |- event_log[]             Event
+     |- live_detections[]       Finding
+     `- anomalies[]             FieldAnomaly    (added by the engine)
 
-- Every type is frozen and every sequence is a tuple, so no pipeline stage can
-  change what it was given.
-- Status, verdict and severity are plain strings, never Enums. A value nobody
-  listed has to render as written rather than being mapped onto a known one.
+Two branches are worth reading twice. A checkpoint's sensor is a SensorBlock
+and a sample's is a SampleSensor: same three measurement blocks, but only the
+checkpoint's carries the flags that say whether to trust them. And Finding is
+one type in three places - the run's own findings, a checkpoint's detections,
+and live_detections.
+
+The definitions below are grouped in five sections, innermost first:
+positions, measurements, readings, the run, the record. Two names are used
+above their own definition - Finding inside Checkpoint, FieldAnomaly inside
+Record - which the `from __future__ import annotations` line allows.
 """
 
 from __future__ import annotations
@@ -19,9 +46,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
-# --- coordinates ---
-#
-# Two shapes, so two types: nothing should assume all four keys are there.
+
+# --- positions ---------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -45,10 +71,10 @@ class Point2D:
     x: float | None = None
     y: float | None = None
 
-# The pieces of a sensor reading
-#
-# Each measurement block is governed by a device health flag in RawSensor. When
-# a flag is false the block's values are placeholders, not measurements
+
+# --- what a sensor measured --------------------------------------------------
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Accelerometer:
     """Movement and vibration. Governed by adxl345_ok."""
@@ -58,6 +84,8 @@ class Accelerometer:
     accel_z: float | None = None
     vibration_peak: float | None = None
     vibration_rms_g: float | None = None
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Environment:
     """Temperature, humidity and pressure. Governed by bme680_ok."""
@@ -65,18 +93,22 @@ class Environment:
     temperature_c: float | None = None
     humidity_pct: float | None = None
     pressure_hpa: float | None = None
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Particulate:
-    """Airborne particulate counts. Governed by sps30_ok.
-    """
+    """Airborne particulate counts. Governed by sps30_ok."""
 
     pm1_0: float | None = None
     pm2_5: float | None = None
     pm4_0: float | None = None
     pm10: float | None = None
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SensorWarning:
     """A threshold warning the sensor hub raised at one checkpoint."""
+
     code: str | None = None
     label: str | None = None
     description: str | None = None
@@ -93,9 +125,9 @@ class RawSensor:
     """
 
     device: str | None = None
-    adxl345_ok: bool | None = None      # governs Accelerometer
-    bme680_ok: bool | None = None       # governs Environment
-    sps30_ok: bool | None = None        # governs Particulate
+    adxl345_ok: bool | None = None          # governs Accelerometer
+    bme680_ok: bool | None = None           # governs Environment
+    sps30_ok: bool | None = None            # governs Particulate
     air_status: str | None = None
     vibration_status: str | None = None
     gas_kohms: float | None = None
@@ -103,10 +135,13 @@ class RawSensor:
     received_at: datetime | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
 
-# The two sensor readings
+
+# --- the two sensor readings -------------------------------------------------
 #
 # A checkpoint's reading and a sample's reading are different shapes, and are
-# kept as different types. Section 2.6 warns against reusing one for both.
+# kept as different types
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SensorBlock:
     """What the sensor hub reported at one checkpoint.
@@ -114,6 +149,7 @@ class SensorBlock:
     `ok`, `status` and `sensor_hub_reachable` say whether the reading can be
     trusted at all; `age_seconds` says how stale it was when recorded.
     """
+
     ok: bool | None = None
     status: str | None = None
     source: str | None = None
@@ -140,6 +176,11 @@ class SampleSensor:
     accelerometer: Accelerometer | None = None
     environment: Environment | None = None
     particulate: Particulate | None = None
+
+
+# --- what the run recorded ---------------------------------------------------
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Checkpoint:
     """One stop on the route.
@@ -209,7 +250,7 @@ class SensorAlert:
     """
 
     code: str
-    severity: str                                   # warning or critical
+    severity: str                           # warning or critical
     timestamp: datetime | None = None
     label: str | None = None
     description: str | None = None
@@ -221,9 +262,7 @@ class SensorAlert:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SensorSample:
-    """One telemetry reading, roughly one every two seconds.
-
-    """
+    """One telemetry reading, roughly one every two seconds."""
 
     timestamp: datetime | None = None
     status: str | None = None
@@ -247,7 +286,7 @@ class Event:
     """
 
     event_id: str
-    event_type: str                          # run_started, checkpoint_completed, run_completed
+    event_type: str                         # run_started, checkpoint_completed, run_completed
     timestamp: datetime | None = None
     message: str | None = None
     status: str | None = None
@@ -256,6 +295,7 @@ class Event:
     checkpoint_name: str | None = None
     evidence_count: int | None = None
 
+# --- the record itself -------------------------------------------------------
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Record:
     """One inspection run.
@@ -268,17 +308,17 @@ class Record:
     one.
     """
 
-    run_id: str                                     # names the output files
+    run_id: str                             # names the output files
     facility_id: str
     facility_name: str
-    run_status: str                                 # RUNNING, COMPLETED, ABORTED
-    final_status: str                               # PASS, FAIL, WARN
+    run_status: str                         # RUNNING, COMPLETED, ABORTED
+    final_status: str                       # PASS, FAIL, WARN
     start_time: datetime | None = None
-    end_time: datetime | None = None                # absent if the run did not finish
-    duration: str | None = None                     # HH:MM:SS, as recorded
+    end_time: datetime | None = None        # absent if the run did not finish
+    duration: str | None = None             # HH:MM:SS, as recorded
     progress_percentage: int | None = None
     locked: bool | None = None
-    current_checkpoint_id: str | None = None        # non-null only mid-run
+    current_checkpoint_id: str | None = None    # non-null only mid-run
 
     # Declared counts: claims about the arrays below, not facts.
     total_required_checkpoints: int | None = None
@@ -301,6 +341,7 @@ class Record:
     anomalies: tuple[FieldAnomaly, ...] = ()
     source_path: Path | None = None
 
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FieldAnomaly:
     """A field that was there but could not be used as recorded.
@@ -309,7 +350,12 @@ class FieldAnomaly:
     timestamp or a refused number survives into the report.
 
     `item_id` is a checkpoint_id, or "__run__" for a run-level field.
+
+    `kind` says what sort of problem it was, because they are not all the same
+    and only one of them is a gap. "datatype" is a value refused for being the
+    wrong type.
     """
     item_id: str
     field_name: str
     problem: str
+    kind: str = "datatype"

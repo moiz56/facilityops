@@ -1,0 +1,34 @@
+{# Contents - front matter.
+
+   3.1 fixes the order of the sections and does not ask for a contents page;
+   this is the client's addition (decision 156). It answers to no switch in
+   5.7's `sections` block, because it is not one of the seven sections - it is
+   the page that says where they are.
+
+   The page numbers are real. render_document lays the document out, reads back
+   the page each section's anchor landed on, and renders again with those
+   numbers, so a row here and the manifest's `sections` range for the same
+   section come from one measurement (4.4). On the measuring pass the numbers
+   are not known yet and the column is empty; the rows are the same height
+   either way, so filling them in does not move what they point at. #}
+<section class="section contents" id="contents">
+
+  <h2>Contents</h2>
+
+  <p class="lede">
+    Where each part of this report begins. The same page numbers appear in the
+    run manifest beside the section they belong to.
+  </p>
+
+  <table class="contents-table">
+    <tbody>
+      {% for row in contents %}
+        <tr>
+          <th>{{ row.label }}</th>
+          <td class="figure">{{ row.page | show("") }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+</section>

@@ -11,7 +11,7 @@
    There is no particulate column (decision 33). Where the device that would
    have filled one was off, the note under the table says so, built from the
    SUBSYSTEM_OFFLINE gaps rather than from a second look at the flag. #}
-<section class="section zone-telemetry">
+<section class="section zone-telemetry" id="zone-telemetry">
 
   <h2>Zone telemetry</h2>
 
@@ -26,74 +26,94 @@
   {% else %}
 
     {# Min, mean and max each get a column, grouped under the measurement they
-       belong to. Sharing one cell put nine figures in three columns and they
-       could not be read down the page; with a column each they line up. #}
-    <table class="data-table zone-table">
-      <colgroup>
-        <col class="zone-name">
-        <col class="zone-count">
-        <col class="zone-figure" span="9">
-        <col class="zone-count">
-      </colgroup>
-      <thead>
-        <tr>
-          <th rowspan="2">Zone</th>
-          <th rowspan="2" class="figure">Samples</th>
-          {% for field, label, unit in zone_columns %}
-            <th colspan="3" class="zone-group zone-measure">{{ label }} <span class="unit">{{ unit }}</span></th>
-          {% endfor %}
-          <th rowspan="2" class="figure">Alerts</th>
-        </tr>
-        <tr>
-          {% for field, label, unit in zone_columns %}
-            <th class="figure zone-group zone-subhead">Min</th>
-            <th class="figure zone-subhead">Mean</th>
-            <th class="figure zone-subhead">Max</th>
-          {% endfor %}
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in derived.zones %}
-          <tr>
-            {# A sample or an alert can record no zone at all. The row is kept
-               and named, because a table that quietly dropped a run's worth of
-               telemetry would not say it had. #}
-            <td>{{ row.zone | show("No zone recorded") }}</td>
-            <td class="figure">{{ row.samples }}</td>
-            {% for field, label, unit in zone_columns %}
-              {% set stat = row | attr(field) %}
-              {% if stat.used %}
-                <td class="figure zone-group">{{ stat.minimum | measure }}</td>
-                {# The mean is over the samples that carried this value, which
-                   is not always every sample the zone recorded. Saying so keeps
-                   the Samples column from reading as the figure the mean was
-                   taken over. #}
-                <td class="figure">
-                  {{- stat.mean | measure -}}
-                  {%- if stat.used != row.samples %}
-                    <span class="zone-used">{{ stat.used }} of {{ row.samples }}</span>
-                  {%- endif -%}
-                </td>
-                <td class="figure">{{ stat.maximum | measure }}</td>
-              {% else %}
-                <td colspan="3" class="zone-group zone-absent">
-                  <span class="absent">{{ stat | zone_absence(row.samples) }}</span>
-                </td>
-              {% endif %}
-            {% endfor %}
-            <td class="figure">{{ row.alerts }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+       belong to. Nine numeric columns on one A4 width could not be followed
+       across a row, so they are split into the two tables the measurements
+       come from: the bme680's environment figures with the zone's alert count,
+       and the adxl345's vibration beside it (decision 164). Every row appears
+       in both, in the same order, so the two read as one table folded. #}
+    {% for title, columns, with_alerts in zone_column_groups %}
+      <h3>{{ title }}</h3>
 
+      <table class="data-table zone-table">
+        <colgroup>
+          <col class="zone-name">
+          <col class="zone-count">
+          <col class="zone-figure" span="{{ columns | length * 3 }}">
+          {% if with_alerts %}<col class="zone-count">{% endif %}
+        </colgroup>
+        <thead>
+          <tr>
+            <th rowspan="2">Zone</th>
+            <th rowspan="2" class="figure">Samples</th>
+            {% for field, label, unit, places in columns %}
+              {# No configured unit prints the measurement name alone, rather than an
+                 empty span the stylesheet would still space for (decision 130). #}
+              <th colspan="3" class="zone-group zone-measure">{{ label }}{% if unit %} <span class="unit">{{ unit }}</span>{% endif %}</th>
+            {% endfor %}
+            {% if with_alerts %}<th rowspan="2" class="figure">Alerts</th>{% endif %}
+          </tr>
+          <tr>
+            {% for field, label, unit, places in columns %}
+              <th class="figure zone-group zone-subhead">Min</th>
+              <th class="figure zone-subhead">Mean</th>
+              <th class="figure zone-subhead">Max</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in derived.zones %}
+            <tr>
+              {# A sample or an alert can record no zone at all. The row is kept
+                 and named, because a table that quietly dropped a run's worth of
+                 telemetry would not say it had. #}
+              <td>{{ row.zone | show("No zone recorded") }}</td>
+              <td class="figure">{{ row.samples }}</td>
+              {% for field, label, unit, places in columns %}
+                {% set stat = row | attr(field) %}
+                {% if stat.used %}
+                  <td class="figure zone-group">{{ stat.minimum | measure(places) }}</td>
+                  {# The mean is over the samples that carried this value, which
+                     is not always every sample the zone recorded. Saying so keeps
+                     the Samples column from reading as the figure the mean was
+                     taken over. #}
+                  <td class="figure">
+                    {{- stat.mean | measure(places) -}}
+                    {%- if stat.used != row.samples %}
+                      <span class="zone-used">{{ stat.used }} of {{ row.samples }}</span>
+                    {%- endif -%}
+                  </td>
+                  <td class="figure">{{ stat.maximum | measure(places) }}</td>
+                {% else %}
+                  <td colspan="3" class="zone-group zone-absent">
+                    <span class="absent">{{ stat | zone_absence(row.samples) }}</span>
+                  </td>
+                {% endif %}
+              {% endfor %}
+              {% if with_alerts %}<td class="figure">{{ row.alerts }}</td>{% endif %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endfor %}
+
+    {# The note follows the scope of the gap behind it. A device off for the
+       whole run raises one gap against __run__ and the note is its sentence; a
+       device off at some checkpoints raises one each, and the note counts them
+       rather than repeating the same sentence seven times (decision 171). By
+       construction it is one or the other, never both. #}
     {% if particulate_offline %}
-      {% set offline_count = particulate_offline | length %}
       <p class="table-note">
-        Particulate is not summarised here. The particulate sensor reported
-        offline at {{ offline_count }} {{ "checkpoint" if offline_count == 1 else "checkpoints" }}, so the values it wrote are
-        placeholders rather than measurements and no statistics are computed
-        over them. Each checkpoint's own sensor table names the device.
+        <span class="gap-tag">{{ particulate_offline[0].gap_type }}</span>
+        Particulate is not summarised here.
+        {% if particulate_offline[0].item_id == run_level %}
+          {{ particulate_offline[0].detail }}.
+        {% else %}
+          The device reported offline at {{ particulate_offline | length }}
+          {{ "checkpoint" if particulate_offline | length == 1 else "checkpoints" }},
+          so what it wrote there is a placeholder rather than a measurement.
+        {% endif %}
+        No statistics are computed over placeholder values, and each
+        checkpoint's own sensor table names the device.
       </p>
     {% endif %}
 

@@ -33,9 +33,9 @@ from common.provenance import stamp
 from common.schema import Record
 from report.derive import DerivedValues, derive_report_values
 from report.gaps import RUN_LEVEL, Gap, detect_gaps
-from report.images import DirectionCell, build_direction_grid
+from report.images import ViewCell, build_view_grid
 from report.manifest import build_manifest, write_manifest
-from report.render import render_pdf
+from report.render import render_document
 
 # Named explicitly: run as "python -m report.cli", __name__ would be "__main__".
 logger = logging.getLogger("report.cli")
@@ -46,7 +46,7 @@ class Artifacts:
 
     record: Record
     images: dict[str, list[ResolvedImage]]
-    grids: dict[str, list[DirectionCell]]
+    grids: dict[str, list[ViewCell]]
     gaps: list[Gap]
     derived: DerivedValues
     pdf_path: Path
@@ -72,7 +72,7 @@ def run_pipeline(
     # resolve_images
     images = resolve_record_images(record, evidence_root)
     grids = {
-        checkpoint_id: build_direction_grid(found)
+        checkpoint_id: build_view_grid(found)
         for checkpoint_id, found in images.items()
     }
 
@@ -87,12 +87,18 @@ def run_pipeline(
     config = load_config(config_path)
     provenance = stamp(record.run_id, config)
 
-    # render
-    pdf_path = render_pdf(record, gaps, derived, grids, config, output_dir, provenance)
+    # render. render_document is render_pdf plus the page numbers it measured
+    # while laying the document out; the manifest needs them and nothing else
+    # can know them (4.4).
+    pdf_path, pages = render_document(
+        record, gaps, derived, grids, config, output_dir, provenance,
+    )
 
     # manifest. The same config path the render used, so the version stamp and
     # the config hash describe the config that was actually applied (4.4).
-    manifest = build_manifest(record, gaps, images, pdf_path, config_path, provenance)
+    manifest = build_manifest(
+        record, gaps, images, pdf_path, config_path, provenance, pages,
+    )
 
     return Artifacts(
         record=record, images=images, grids=grids, gaps=gaps,
@@ -198,15 +204,15 @@ def log_summary(artifacts: Artifacts) -> None:
         logger.info("  %-20s %d", name, count)
 
     for checkpoint_id, grid in artifacts.grids.items():
-        missing = [cell.direction for cell in grid if cell.rgb is None]
+        no_rgb = [cell.view or "unlabelled" for cell in grid if cell.rgb is None]
         no_thermal = [
-            cell.direction for cell in grid
+            cell.view or "unlabelled" for cell in grid
             if cell.rgb is not None and cell.thermal is None
         ]
         logger.debug(
-            "  %s: %d of 8 directions%s%s",
-            checkpoint_id, 8 - len(missing),
-            f", no image for {', '.join(missing)}" if missing else "",
+            "  %s: %d views recorded%s%s",
+            checkpoint_id, len(grid),
+            f", no RGB for {', '.join(no_rgb)}" if no_rgb else "",
             f", no thermal for {', '.join(no_thermal)}" if no_thermal else "",
         )
 

@@ -61,6 +61,30 @@ def declared_counts(record: Record) -> Counts:
     )
 
 
+def was_warned(checkpoint: Checkpoint) -> bool:
+    """Whether anything about this checkpoint amounts to a warning.
+
+    Two things do, and either is enough. The verdict `WARN` is one. A
+    non-empty `sensor.warnings` array is the other: the hub raised a threshold
+    warning there, whatever verdict the checkpoint was given afterwards.
+
+    Counting only the verdict is what let the reference run pass reconciliation
+    while contradicting itself. 2.9 names that case exactly - warned_checkpoints
+    declared 0 against six of eight checkpoints carrying warnings - and says the
+    contradiction must appear in the report. It could not, while the figure the
+    declaration was compared against counted only verdicts and came back 0 too
+    (decision 176).
+
+    The warnings are read as recorded, without asking whether the reading they
+    came with was trustworthy. A warning is not a measurement: it says the hub
+    flagged something, and that it was flagged is true whether or not the
+    numbers beside it can be used.
+    """
+    return checkpoint.result_status == "WARN" or bool(
+        checkpoint.sensor is not None and checkpoint.sensor.warnings
+    )
+
+
 def computed_counts(record: Record) -> Counts:
     """What the arrays actually contain."""
     checkpoints = record.checkpoints
@@ -70,7 +94,7 @@ def computed_counts(record: Record) -> Counts:
         passed=sum(1 for c in checkpoints if c.result_status == "PASS"),
         failed=sum(1 for c in checkpoints if c.result_status == "FAIL"),
         missed=sum(1 for c in checkpoints if c.status == "MISSED"),
-        warned=sum(1 for c in checkpoints if c.result_status == "WARN"),
+        warned=sum(1 for c in checkpoints if was_warned(c)),
         findings=len(record.findings),
     )
 

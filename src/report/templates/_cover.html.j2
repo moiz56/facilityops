@@ -6,7 +6,7 @@
    A count the record declared differently is printed with that claim beside it
    and marked. 2.9 forbids silently preferring one figure over the other, and
    the coverage page reconciles them in full (3.3). #}
-<section class="section cover">
+<section class="section cover" id="cover">
 
   {% if logo_uri %}
     <img class="cover-logo" src="{{ logo_uri }}" alt="">
@@ -25,6 +25,19 @@
     <tr><th>Ended</th><td>{{ record.end_time | moment("Not recorded - the run did not finish") }}</td></tr>
     <tr><th>Duration</th><td>{{ record.duration | show }}</td></tr>
     <tr><th>Run status</th><td>{{ record.run_status }}</td></tr>
+    {# 2.1's three run-state fields. 3.1's list of what the cover carries does
+       not name them, and they belong here for the same reason Run status does
+       (decision 43): the report is read long after the run, and what it says
+       about a run that was still being written to means something different
+       from what it says about a closed one.
+
+       progress_percentage corroborates run_status - 100 beside COMPLETED, a
+       lower figure beside a run that stopped - and current_checkpoint_id is
+       non-null only mid-run, so an em dash is the whole answer for a run that
+       is not in progress. #}
+    <tr><th>Progress</th><td>{{ record.progress_percentage | percentage }}</td></tr>
+    <tr><th>Current checkpoint</th><td>{{ record.current_checkpoint_id | show("—") }}</td></tr>
+    <tr><th>Record locked</th><td>{{ record.locked | lock_state }}</td></tr>
   </table>
 
   <h2>Headline counts</h2>
@@ -42,6 +55,39 @@
     {% endfor %}
   </table>
 
+  {# 3.1 asks the cover for the headline counts and stops there. The findings
+     and the alerts are the other half of the run's shape, and a reader who
+     only ever sees this page should not have to turn to section 2 to learn
+     whether anything was found. Both figures are the ones those sections
+     print: the findings row of the reconciliation table, and the severity
+     tally the alerts section and the manifest share (decision 163). #}
+  <h2>Findings and alerts</h2>
+
+  <p class="cover-shape">
+    {% if findings_row.computed %}
+      {{ findings_row.computed }} finding{{ "" if findings_row.computed == 1 else "s" }} recorded.
+    {% else %}
+      No findings recorded.
+    {% endif %}
+    {% set alert_total = derived.alerts_by_severity.values() | sum %}
+    {% if alert_total %}
+      {{ alert_total }} sensor alert{{ "" if alert_total == 1 else "s" }} logged during the run.
+    {% else %}
+      No sensor alerts logged during the run.
+    {% endif %}
+  </p>
+
+  {% if derived.alerts_by_severity %}
+    <p class="cover-alerts">
+      {% for severity, total in derived.alerts_by_severity.items() %}
+        <span class="alerts-tally">
+          <span class="badge badge-small badge-{{ severity | severity_style }}">{{ severity }}</span>
+          <span class="alerts-total">{{ total }}</span>
+        </span>
+      {% endfor %}
+    </p>
+  {% endif %}
+
   {% if counts_disagree %}
     <p class="absent-strong">
       The record's own counts disagree with the checkpoints it contains.
@@ -50,7 +96,10 @@
   {% endif %}
 
   {% if empty_record %}
-    <p class="absent-strong">No checkpoints were recorded for this run.</p>
+    <p class="absent-strong">
+      <span class="gap-tag">{{ empty_record.gap_type }}</span>
+      No checkpoints were recorded for this run.
+    </p>
   {% endif %}
 
 </section>

@@ -9,7 +9,7 @@
    recorded, and every checkpoint that captured no evidence, with what the check
    observed. Both lists are built from detect_gaps' output, so they name the
    same checkpoints the manifest does (4.4, 5.4). #}
-<section class="section coverage">
+<section class="section coverage" id="coverage">
 
   <h2>Coverage and reconciliation</h2>
 
@@ -42,17 +42,26 @@
     <p class="table-note">* Declared and computed disagree. Each conflict is stated below.</p>
   {% endif %}
 
+  {# The heading prints whether or not there are conflicts. Without the empty
+     state a reader cannot tell a run whose counts all agreed from one where the
+     list failed to render, and the agreement is a finding of its own. #}
+  <h3>Count conflicts</h3>
+
   {% if count_conflicts %}
-    <h3>Count conflicts</h3>
     <p class="lede">
       Each row above where the record's declared count and its own data
       disagree, stated in full. Both figures are printed; neither is corrected.
     </p>
     <ul class="conflicts">
       {% for gap in count_conflicts %}
-        <li>{{ gap.detail }}</li>
+        <li><span class="gap-tag">{{ gap.gap_type }}</span> {{ gap.detail }}</li>
       {% endfor %}
     </ul>
+  {% else %}
+    <p class="absent-note">
+      Every count the record declared agrees with the data it describes. A count
+      the record never declared is shown as not declared in the table above.
+    </p>
   {% endif %}
 
   {% if empty_record %}
@@ -60,7 +69,10 @@
        checkpoints: "every checkpoint was reached" is vacuously true and reads
        as a finding. 3.6 asks for a plain statement instead. #}
     <h3>Checkpoints</h3>
-    <p class="absent-strong">No checkpoints were recorded for this run.</p>
+    <p class="absent-strong">
+      <span class="gap-tag">{{ empty_record.gap_type }}</span>
+      No checkpoints were recorded for this run.
+    </p>
   {% else %}
 
     <h3>Checkpoints not reached</h3>
@@ -74,7 +86,10 @@
             <tr>
               <td>{{ item.checkpoint_name }}</td>
               <td>{{ item.checkpoint_id }}</td>
-              <td class="absent">{{ item.detail }}</td>
+              <td class="absent">
+                <span class="gap-tag">{{ item.gap_type }}</span>
+                {{ item.detail }}
+              </td>
             </tr>
           {% endfor %}
         </tbody>
@@ -95,7 +110,10 @@
               <td>{{ item.checkpoint_name }}</td>
               <td>{{ item.checkpoint_id }}</td>
               <td>{{ item.observed | show }}</td>
-              <td class="absent">{{ item.detail }}</td>
+              <td class="absent">
+                <span class="gap-tag">{{ item.gap_type }}</span>
+                {{ item.detail }}
+              </td>
             </tr>
           {% endfor %}
         </tbody>
@@ -104,6 +122,157 @@
       <p>Every checkpoint recorded at least one evidence image.</p>
     {% endif %}
 
+  {% endif %}
+
+  {# The evidence count check, stated whether or not it found anything. A check
+     that ran and passed silently is indistinguishable, to a reader, from a check
+     that never ran, so every checkpoint gets a row. Every figure and every
+     sentence here comes from detect_gaps' output (5.4), so a marked row and a
+     manifest gap are the same fact. #}
+  <h3>Evidence count reconciliation</h3>
+  <p class="lede">
+    For each checkpoint: the evidence count the event log declared, the number of
+    evidence paths the checkpoint listed, and how many of those paths resolved to
+    a usable image file. Where the three do not agree the row is marked and the
+    reason is printed beside it.
+  </p>
+
+  {% if evidence_rows %}
+    <table class="data-table evidence-counts">
+      <thead>
+        <tr>
+          <th>Checkpoint</th>
+          <th class="figure">Declared</th>
+          <th class="figure">Listed</th>
+          <th class="figure">Resolved</th>
+          <th>Result</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in evidence_rows %}
+          <tr{% if row.mismatch %} class="count-disagrees"{% endif %}>
+            {# The id under the name rather than beside it: six columns left the
+               Result column too narrow for the label it carries, and the id is
+               what an auditor matches against the manifest. #}
+            <td>
+              {{ row.checkpoint_name }}
+              <span class="row-id">{{ row.checkpoint_id }}</span>
+            </td>
+            <td class="figure">{{ row.declared | join(", ") | show("Not declared") }}</td>
+            <td class="figure">{{ row.referenced }}</td>
+            <td class="figure">{{ row.resolved }}</td>
+            <td>
+              {% if row.mismatch %}
+                {# The gap types this row actually raised, named as the manifest
+                   files them: twelve declared against twelve listed with one
+                   unreadable file is a MISSING_IMAGE, not a count conflict. #}
+                {% for name in row.gap_types %}
+                  <span class="gap-tag">{{ name }}</span>
+                {% endfor %}
+              {% elif row.declared %}
+                Reconciled
+              {% else %}
+                No count declared
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {# The reasons sit under the table rather than in the Result column: the
+       path a resolution failed on is longer than any column on this page, and
+       the row above is what says which checkpoint it belongs to. Same shape as
+       the count conflicts higher up - mark the row, state the conflict below. #}
+    {% if evidence_mismatches %}
+      <p class="table-note">
+        A marked row names the gaps it raised, under the names the run manifest
+        files them: COUNT_MISMATCH where the declared count is not the number of
+        paths listed, MISSING_IMAGE where a listed path gave no usable file.
+      </p>
+
+      <h4>Why a row did not reconcile</h4>
+      <ul class="conflicts">
+        {% for row in evidence_mismatches %}
+          <li>
+            {{ row.checkpoint_name }} ({{ row.checkpoint_id }})
+            <ul class="reasons">
+              {% for reason in row.reasons %}
+                <li>{{ reason }}</li>
+              {% endfor %}
+            </ul>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% else %}
+    <p class="absent-strong">
+      No evidence count was declared and no checkpoint listed an evidence image.
+    </p>
+  {% endif %}
+
+</section>
+
+{# Every gap in one place - C-2.
+
+   The same list the manifest carries in its `gaps` array, in the same order:
+   per checkpoint in route order, then the run-level ones. 4.4 requires every
+   manifest gap to be visible in the PDF and every PDF gap to be in the
+   manifest, and this is where a reader checks that by eye rather than by diff.
+
+   Nothing here is new. Each gap has already been stated where it belongs - in
+   a checkpoint's block, in a cell of its evidence grid, under the
+   reconciliation table - and this repeats them so they can be counted.
+
+   Its own section, so it starts on a fresh page and the reconciliation table
+   above keeps its own. It renders with the coverage section, which is the
+   section 5.7 gives it a switch under. #}
+<section class="section gap-list" id="gaps">
+
+  <h2>All gaps</h2>
+
+  {% if gap_rows %}
+    <p class="lede">
+      Every gap this run raised, in the order the run manifest lists them. Each
+      appears in full where it belongs as well; this table is for reading the
+      whole set at once, and for checking it against the manifest.
+    </p>
+
+    <p class="gap-count">
+      {{ gap_rows | length }} gap{{ "" if gap_rows | length == 1 else "s" }} recorded.
+    </p>
+
+    <table class="data-table gap-table">
+      <thead>
+        <tr>
+          <th>Gap type</th>
+          <th>Item</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in gap_rows %}
+          <tr>
+            <td><span class="gap-tag">{{ row.gap_type }}</span></td>
+            <td>
+              {{ row.item_id }}
+              {% if row.item_name %}
+                <span class="row-id">{{ row.item_name }}</span>
+              {% elif row.item_id == run_level %}
+                <span class="row-id">the run itself</span>
+              {% endif %}
+            </td>
+            <td>{{ row.detail }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="absent-note">
+      No gaps were raised for this run. Every checkpoint was reached, every
+      image referenced resolved, every sensor reading was usable, and every
+      declared count agreed with the data.
+    </p>
   {% endif %}
 
 </section>

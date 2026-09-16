@@ -3,25 +3,20 @@
 A Gap is one thing missing, stale, or contradictory in a run. Every gap shown
 is found here, and every gap in the manifest is found here, so the
 two can never disagree about what was wrong with a run.
-
-That is why the rules live in this module and not in the templates. A template
-that decided for itself whether a sensor reading could be trusted would spread
-that decision across a dozen files, and none of it could be tested on its own.
-
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Sequence
+from typing import Collection, Sequence
 
 from pathlib import PurePosixPath
 
 from common.paths import CONFIG_PATH, ResolvedImage, load_config, setting
 from common.schema import Checkpoint, Finding, Record, SensorBlock
 from report.derive import SUBSYSTEM_FLAGS, computed_counts, declared_counts
-from report.images import DirectionCell, build_direction_grid
+from report.images import ViewCell, build_view_grid
 
 #: item_id for a gap that belongs to the run itself rather than to a checkpoint.
 RUN_LEVEL = "__run__"
@@ -29,15 +24,12 @@ RUN_LEVEL = "__run__"
 
 class GapType(StrEnum):
     """The ten kinds of gap. A closed set: no others, ever.
-
-    A StrEnum, so a gap type writes itself into the manifest as its own name
-    and there is no conversion step to forget.
     """
 
     #: A referenced image does not resolve, is empty, or will not decode.
     MISSING_IMAGE = "MISSING_IMAGE"
 
-    #: A direction has an RGB image and no thermal counterpart.
+    #: A view has an RGB image and no thermal counterpart.
     #: Provisional, pending question 7 in decisions.md: this fires whether or
     #: not that RGB itself resolves, so a zero-byte RGB reports both this and
     #: MISSING_IMAGE. Read the other way, one broken file would suppress a
@@ -71,6 +63,9 @@ class GapType(StrEnum):
     #: The checkpoints array is empty.
     EMPTY_RECORD = "EMPTY_RECORD"
 
+    #: A field arrived as the wrong type and was refused.
+    INCORRECT_DATATYPE = "INCORRECT_DATATYPE"
+
 
 @dataclass(frozen=True)
 class Gap:
@@ -78,58 +73,23 @@ class Gap:
 
     `detail` is the sentence the reader sees, in both the PDF and the
     manifest, so it names what is missing rather than restating the gap type:
-    "directions N, NE, E, SE have RGB with no thermal counterpart", not
-    "missing thermal".
     """
 
     item_id: str          # a checkpoint_id, or RUN_LEVEL for the run itself
     gap_type: GapType
     detail: str
 
-
-# --- one function per gap type ---------------------------------------------
-#
-# Each function decides one gap type and nothing else, so any rule can be read
-# or tested on its own. Every one takes a checkpoint, returns a list, and
-# returns an empty list when it finds nothing.
-#
-#   missed_checkpoint_gaps    status is MISSED
-#   no_evidence_gaps          no images listed, or observed says no_evidence
-#   missing_image_gaps        a listed image is absent, empty, or undecodable
-#   missing_thermal_gaps      a direction has RGB and no thermal beside it
-#   sensor_unavailable_gaps   the whole reading cannot be trusted
-#   subsystem_offline_gaps    one device flag is false
-#   stale_reading_gaps        the reading was older than the maximum
-#   no_findings_gaps          no finding references this checkpoint
-#
-# Two belong to the run rather than to a checkpoint:
-#
-#   count_mismatch_gaps       a declared count disagrees with the data
-#   empty_record_gaps         the checkpoints array is empty
-#
-# checkpoint_gaps() runs the per-checkpoint rules, run_gaps() the run-level
-# ones, and detect_gaps() runs everything for a whole record.
-
 _config = load_config(CONFIG_PATH)
 
-#: Above this many seconds a reading still renders, but flagged stale.
+# above this many seconds a reading still renders, but flagged stale.
 MAX_AGE_SECONDS: float = setting(_config, "sensor", "max_age_seconds")
 
-# SUBSYSTEM_FLAGS is defined in derive.py and re-exported here. One definition
-# of which flag governs which block keeps this module's gap and derive's
-# suppressed zone statistic from ever disagreeing about the same device.
 
-
+# to give out the reason for why the sensor reading can not be used
 def unavailable_reason(sensor: SensorBlock | None) -> str | None:
     """Why the whole reading cannot be used, or None when it can.
-
     Not a gap rule itself. sensor_unavailable_gaps turns it into a gap, and the
     two per-block rules ask it whether there is any point looking inside.
-
-    `status` has to say "connected" for the reading to count, so one that never
-    says what its status was is not trusted either. `ok` and
-    `sensor_hub_reachable` work the other way round: they are read as failures
-    only when they actually say false, since an absent flag claims nothing.
     """
     if sensor is None:
         return "no sensor reading was recorded"
@@ -144,9 +104,6 @@ def unavailable_reason(sensor: SensorBlock | None) -> str | None:
 
 def missed_checkpoint_gaps(checkpoint: Checkpoint) -> list[Gap]:
     """MISSED_CHECKPOINT: the robot never reached this checkpoint.
-
-    Only the exact value MISSED counts. Some records carry PENDING, which is
-    rendered as written rather than read as a miss.
     """
     if checkpoint.status != "MISSED":
         return []
@@ -166,7 +123,7 @@ def no_evidence_gaps(checkpoint: Checkpoint) -> list[Gap]:
     if not checkpoint.evidence_images:
         causes.append("evidence_images empty")
     if checkpoint.observed == "no_evidence":
-        causes.append("observed=no_evidence")
+        causes.append("observed = no_evidence")
     if not causes:
         return []
     return [Gap(checkpoint.checkpoint_id, GapType.NO_EVIDENCE, "; ".join(causes))]
@@ -188,29 +145,28 @@ def missing_image_gaps(checkpoint: Checkpoint, images: list[ResolvedImage]) -> l
     ]
 
 
-def missing_thermal_gaps(checkpoint: Checkpoint, grid: list[DirectionCell]) -> list[Gap]:
-    """MISSING_THERMAL: a direction has an RGB image and no thermal beside it.
+def missing_thermal_gaps(checkpoint: Checkpoint, grid: list[ViewCell]) -> list[Gap]:
+    """MISSING_THERMAL: a view has an RGB image and no thermal beside it.
 
-    Takes the grid rather than the images, because the pipeline has already
-    paired them. Building a second grid here would mean two answers to the same
-    question, and the manifest and the page have to give the same one.
-
-    One gap per checkpoint naming the directions, not one per direction: eight
-    gaps all saying the same thing would bury everything else in the manifest.
-
-    Provisional, pending question 7 in decisions.md: a direction counts as
-    having an RGB image once the record referenced one, whether or not that
-    file resolves. Read the other way, one broken file would suppress a second,
-    unrelated gap.
+    Views are named where the filenames named them and unnamed where they did
+    not, so the detail either lists the labels or says how many views were
+    unpaired. A checkpoint that recorded one unlabelled picture and no thermal
+    still reports the gap; it just has no label to quote.
     """
-    unpaired = [cell.direction for cell in grid if cell.rgb is not None and cell.thermal is None]
+    unpaired = [cell.view for cell in grid if cell.rgb is not None and cell.thermal is None]
     if not unpaired:
         return []
+
     one = len(unpaired) == 1
+    named = [view for view in unpaired if view]
+    if named:
+        what = f"{'view' if one else 'views'} {', '.join(named)}"
+    else:
+        what = "the recorded view" if one else f"{len(unpaired)} recorded views"
+
     return [Gap(
         checkpoint.checkpoint_id, GapType.MISSING_THERMAL,
-        f"{'direction' if one else 'directions'} {', '.join(unpaired)} "
-        f"{'has' if one else 'have'} RGB with no thermal counterpart",
+        f"{what} {'has' if one else 'have'} RGB with no thermal counterpart",
     )]
 
 
@@ -226,12 +182,20 @@ def sensor_unavailable_gaps(checkpoint: Checkpoint) -> list[Gap]:
     return [Gap(checkpoint.checkpoint_id, GapType.SENSOR_UNAVAILABLE, reason)]
 
 
-def subsystem_offline_gaps(checkpoint: Checkpoint) -> list[Gap]:
+def subsystem_offline_gaps(
+    checkpoint: Checkpoint, run_level_blocks: Collection[str] = (),
+) -> list[Gap]:
     """SUBSYSTEM_OFFLINE: a device flag is false, so that block is not a measurement.
 
     Reports nothing when the whole reading is already unavailable: the table
     then reads "Sensor unavailable" and a gap naming one block inside it would
     describe something the page never shows (decision 19).
+
+    `run_level_blocks` are the blocks whose device was off at every checkpoint
+    that could report on it. Those are one gap about the run, raised by
+    run_subsystem_offline_gaps, so they are not repeated here - eight identical
+    gaps saying the same thing is a scope the item_id already expresses
+    (decision 171).
     """
     sensor = checkpoint.sensor
     if unavailable_reason(sensor) is not None:
@@ -242,7 +206,67 @@ def subsystem_offline_gaps(checkpoint: Checkpoint) -> list[Gap]:
             f"{flag}=false; {block} block not recorded",
         )
         for flag, block in SUBSYSTEM_FLAGS.items()
-        if getattr(sensor.raw, flag, None) is False
+        if getattr(sensor.raw, flag, None) is False and block not in run_level_blocks
+    ]
+
+
+def offline_everywhere(record: Record) -> dict[str, tuple[str, int, int]]:
+    """Blocks whose device was off wherever it could be read: block -> (flag, off, readable).
+
+    A checkpoint reports on a flag only when its reading is usable at all: one
+    whose whole sensor is unavailable says nothing about any device inside it,
+    which is the same rule decision 19 applies to the gap. An absent flag claims
+    nothing either (decision 21).
+
+    A block qualifies when at least one checkpoint reported the flag false and
+    none reported it true. `off` is how many said so and `readable` how many
+    could have.
+    """
+    off: dict[str, int] = {}
+    readable: dict[str, int] = {}
+    working: set[str] = set()
+
+    for checkpoint in record.checkpoints:
+        if unavailable_reason(checkpoint.sensor) is not None:
+            continue
+        raw = checkpoint.sensor.raw
+        for flag, block in SUBSYSTEM_FLAGS.items():
+            value = getattr(raw, flag, None)
+            if value is None:
+                continue
+            readable[block] = readable.get(block, 0) + 1
+            if value is False:
+                off[block] = off.get(block, 0) + 1
+            else:
+                working.add(block)
+
+    return {
+        block: (flag, off[block], readable[block])
+        for flag, block in SUBSYSTEM_FLAGS.items()
+        if off.get(block) and block not in working
+    }
+
+
+def run_subsystem_offline_gaps(record: Record) -> list[Gap]:
+    """SUBSYSTEM_OFFLINE for a device that was off for the whole run.
+
+    One gap, owned by the run rather than by a checkpoint, because that is what
+    the fact is about: the device never worked, and eight checkpoints repeating
+    it says nothing the first one did not. The detail names the device and the
+    span it covers, so a reader of the manifest can tell this from a gap about
+    one checkpoint without looking at anything else.
+
+    The flag stays at the front of the detail, where offline_block_gaps reads it
+    back, so a section that leaves a measurement out still names the same device
+    the manifest does.
+    """
+    return [
+        Gap(
+            RUN_LEVEL, GapType.SUBSYSTEM_OFFLINE,
+            f"{flag}=false at every checkpoint that reported it "
+            f"({off} of {readable}); {block} block not recorded for the run",
+        )
+        for block, (flag, off, readable) in offline_everywhere(record).items()
     ]
 
 
@@ -314,17 +338,48 @@ def empty_record_gaps(record: Record) -> list[Gap]:
     return [Gap(RUN_LEVEL, GapType.EMPTY_RECORD, "no checkpoints recorded")]
 
 
+def datatype_gaps(record: Record, item_id: str | None = None) -> list[Gap]:
+    """INCORRECT_DATATYPE: a field was the wrong type, and was refused rather than read.
+
+    The loader never converts: a confidence written as the string "0.94" is left
+    unset and recorded as an anomaly, so the page prints "Not scored" and no
+    measurement is invented from it (TA-27). This turns that record into a gap,
+    so the refusal appears in the report and the manifest instead of only in the
+    log.
+
+    Only anomalies of kind "datatype" become gaps. A required field that was
+    absent, an array entry dropped for having no id, and a checkpoint_id used
+    twice are all recorded by the loader too, and none of them is a datatype
+    problem; 4.3 has no member for them, so they stay in the anomaly log.
+
+    `item_id` narrows it to one checkpoint. None returns every one.
+    """
+    return [
+        Gap(
+            anomaly.item_id, GapType.INCORRECT_DATATYPE,
+            f"{anomaly.field_name}: {anomaly.problem}",
+        )
+        for anomaly in record.anomalies
+        if anomaly.kind == "datatype" and (item_id is None or anomaly.item_id == item_id)
+    ]
+
+
 def checkpoint_gaps(
     checkpoint: Checkpoint,
     images: list[ResolvedImage],
-    grid: list[DirectionCell],
+    grid: list[ViewCell],
     findings: Sequence[Finding] = (),
+    run_level_blocks: Collection[str] = (),
 ) -> list[Gap]:
     """Every gap for one checkpoint, in a fixed order.
 
     `images` is that checkpoint's evidence paths, resolved against the evidence
     root; `grid` is those images paired into the eight compass cells. Both come
     from the resolve_images stage, so nothing is resolved or paired twice.
+
+    `run_level_blocks` are the blocks already reported as off for the whole run.
+    A trailing argument with a default, so a caller that has one checkpoint and
+    no view of the run still gets that checkpoint's gaps.
     """
     return [
         *missed_checkpoint_gaps(checkpoint),
@@ -332,21 +387,33 @@ def checkpoint_gaps(
         *missing_image_gaps(checkpoint, images),
         *missing_thermal_gaps(checkpoint, grid),
         *sensor_unavailable_gaps(checkpoint),
-        *subsystem_offline_gaps(checkpoint),
+        *subsystem_offline_gaps(checkpoint, run_level_blocks),
         *stale_reading_gaps(checkpoint),
         *no_findings_gaps(checkpoint, findings),
     ]
 
 
 def run_gaps(record: Record) -> list[Gap]:
-    """Every gap that belongs to the run rather than to one checkpoint."""
-    return [*empty_record_gaps(record), *count_mismatch_gaps(record)]
+    """Every gap that belongs to the run rather than to one checkpoint.
+
+    The datatype gaps here are the ones no checkpoint owns: a run-level field,
+    or an array entry the loader could only locate by position. A checkpoint's
+    own are raised beside it, in detect_gaps.
+    """
+    known = {checkpoint.checkpoint_id for checkpoint in record.checkpoints}
+    return [
+        *empty_record_gaps(record),
+        *run_subsystem_offline_gaps(record),
+        *count_mismatch_gaps(record),
+        *evidence_count_gaps(record),
+        *[gap for gap in datatype_gaps(record) if gap.item_id not in known],
+    ]
 
 
 def detect_gaps(
     record: Record,
     images: dict[str, list[ResolvedImage]],
-    grids: dict[str, list[DirectionCell]] | None = None,
+    grids: dict[str, list[ViewCell]] | None = None,
 ) -> list[Gap]:
     """Every gap in a run: checkpoints in route order, then the run itself.
 
@@ -358,9 +425,13 @@ def detect_gaps(
     """
     if grids is None:
         grids = {
-            checkpoint_id: build_direction_grid(found)
+            checkpoint_id: build_view_grid(found)
             for checkpoint_id, found in images.items()
         }
+
+    # Devices that were off wherever they could be read are one gap about the
+    # run, not one per checkpoint, so the per-checkpoint rule skips them.
+    run_level_blocks = set(offline_everywhere(record))
 
     gaps = []
     for checkpoint in record.checkpoints:
@@ -368,9 +439,14 @@ def detect_gaps(
         gaps += checkpoint_gaps(
             checkpoint,
             found,
-            grids.get(checkpoint.checkpoint_id) or build_direction_grid(found),
+            grids.get(checkpoint.checkpoint_id) or build_view_grid(found),
             record.findings,
+            run_level_blocks,
         )
+        # The fields of this checkpoint the loader refused. Raised here rather
+        # than inside checkpoint_gaps, which is given one checkpoint and not the
+        # record's anomaly list.
+        gaps += datatype_gaps(record, checkpoint.checkpoint_id)
     return gaps + run_gaps(record)
 
 
@@ -379,27 +455,14 @@ def detect_gaps(
 # Declared counts are claims, not facts, and every one is cross-checked against
 # the data it describes. Where they disagree the report prints both figures and
 # flags the conflict; it never silently prefers one.
-#
-# Two checks produce COUNT_MISMATCH:
-#
-#   the seven rows of the coverage page   declared vs the arrays      __run__
-#   evidence_count vs evidence_images      per checkpoint (TA-25)      its id
-#
-# A third was removed pending question 17: warned_checkpoints against the
-# checkpoints carrying a non-empty sensor.warnings array. 2.9's worked example
-# and TA-23 both describe that comparison, but 3.3 computes the Warned row from
-# result_status, so the two readings disagree about what warned_checkpoints is
-# a claim about. See count_mismatch_gaps.
 
-#: Each row of the coverage page: the Counts field, the record field it was
-#: declared in, and what the computed figure actually counted.
 COUNT_ROWS = (
     ("required", "total_required_checkpoints", "checkpoints in the array"),
     ("completed", "total_completed_checkpoints", "checkpoints with status COMPLETED"),
     ("passed", "passed_checkpoints", "checkpoints with result_status PASS"),
     ("failed", "failed_checkpoints", "checkpoints with result_status FAIL"),
     ("missed", "missed_checkpoints", "checkpoints with status MISSED"),
-    ("warned", "warned_checkpoints", "checkpoints with result_status WARN"),
+    ("warned", "warned_checkpoints", "checkpoints with result_status WARN or a sensor warning"),
     ("findings", "finding_count", "findings in the array"),
 )
 
@@ -427,8 +490,7 @@ def disagreeing_counts(record: Record) -> set[str]:
 def count_mismatch_gaps(record: Record) -> list[Gap]:
     """COUNT_MISMATCH: a declared count disagrees with the data it describes.
 
-    A count the record never declared raises nothing here. There is no claim to
-    disagree with, and the loader has already recorded the field as absent.
+    The seven rows of the coverage page, and nothing else. 
     """
     declared = declared_counts(record)
     computed = computed_counts(record)
@@ -443,21 +505,24 @@ def count_mismatch_gaps(record: Record) -> list[Gap]:
         for name, field, counted in COUNT_ROWS
         if name in disagreeing
     ]
+    return gaps
 
-    # Removed, pending question 17. warned_checkpoints was also cross-checked
-    # against the checkpoints carrying a non-empty sensor.warnings array, which
-    # is what 2.9's worked example and TA-23 describe. It is not one of 3.3's
-    # rows - 3.3 computes Warned from result_status - so it raised a second
-    # COUNT_MISMATCH on a row the table showed as agreeing. Until the client
-    # rules on which comparison was meant, the engine reports only the seven
-    # rows and the per-checkpoint evidence count. TA-23 does not pass in this
-    # state.
 
-    # Each event that declared an evidence count, against the images that
-    # checkpoint actually lists. Owned by the checkpoint, not the run.
+def evidence_count_gaps(record: Record) -> list[Gap]:
+    """COUNT_MISMATCH: event_log's evidence count is not the array's length.
+    """
     listed = {c.checkpoint_id: len(c.evidence_images) for c in record.checkpoints}
+
+    gaps = []
     for event in record.event_log:
-        if event.evidence_count is None or event.checkpoint_id not in listed:
+        if event.evidence_count is None or event.checkpoint_id is None:
+            continue
+        if event.checkpoint_id not in listed:
+            gaps.append(Gap(
+                event.checkpoint_id, GapType.COUNT_MISMATCH,
+                f"event_log declared evidence_count {event.evidence_count}; "
+                f"the run recorded no checkpoint with this id",
+            ))
             continue
         actual = listed[event.checkpoint_id]
         if event.evidence_count != actual:

@@ -18,6 +18,10 @@
   {% include "_cover.html.j2" %}
 {% endif %}
 
+{# Front matter, not one of 5.7's seven sections: it says where they are, so
+   it renders whenever anything else does. #}
+{% include "_contents.html.j2" %}
+
 {% if sections.coverage %}
   {% include "_coverage.html.j2" %}
 {% endif %}

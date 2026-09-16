@@ -1,7 +1,5 @@
 # Report engine configuration.
 #
-# Values are taken from the Milestone 1 brief, section 5.7.
-#
 # Keys marked TUNABLE in the brief are starting values. Changing one means
 # recording the old value, the new value and a reason in decisions.md.
 
@@ -15,7 +13,7 @@ provenance:                        # stamped into every page footer and the mani
   template_version: full_report_v1
 
 manifest:
-  version: "1.0"                   # 4.2's manifest_version - the shape of the manifest itself
+  version: "1.0"                  
 
 paths:
   path_prefix: /run-files          # stripped from evidence_images before joining evidence_root
@@ -27,10 +25,26 @@ sensor:
     bme680_ok: environment
     sps30_ok: particulate
 
+units:                             # measurement field -> the unit it is printed in
+
+decimals: # measurement field -> decimal places it prints to
+  temperature_c: 2
+  humidity_pct: 2
+  pressure_hpa: 2
+  vibration_peak: 3
+  vibration_rms_g: 3
+  accel_x: 3
+  accel_y: 3
+  accel_z: 3
+  x: 3
+  y: 3
+  z: 3
+  yaw: 3
+
 evidence:
-  directions: [N, NE, E, SE, S, SW, W, NW]
-  grid_columns: 4
-  thermal_suffix: _thermal
+  grid_columns: 4                # most cells on a row; a checkpoint with fewer uses fewer
+  thermal_suffix: _thermal       # filename marker for a thermal image
+  rgb_suffix: _rgb               # filename marker for an RGB image; unmarked is RGB too
 
 sections:
   cover: true
@@ -42,6 +56,7 @@ sections:
   summary: true
 
 branding:
+  stylesheet: styles.css           # a file in src/report/templates/: styles.css or style_default.css
   logo_path: config/assets/logo.png
   primary_colour: "#1F3864"
   footer_text: "Prepared by FacilityOps.AI"
