@@ -20,15 +20,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
-from common.paths import CONFIG_PATH, load_config, setting
+from common.paths import DEFAULT_CONFIG, setting
 from common.schema import Checkpoint, Record, SensorSample
-
-_config = load_config(CONFIG_PATH)
 
 #: raw device flag -> the sensor block it governs. The block names are the
 #: attribute names on both SensorBlock and SampleSensor, which is what lets a
 #: checkpoint's flag decide whether a sample's block can be read.
-SUBSYSTEM_FLAGS: dict[str, str] = setting(_config, "sensor", "subsystem_flags")
+SUBSYSTEM_FLAGS: dict[str, str] = setting(DEFAULT_CONFIG, "sensor", "subsystem_flags")
 
 
 @dataclass(frozen=True)

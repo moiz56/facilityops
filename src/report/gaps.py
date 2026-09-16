@@ -13,7 +13,7 @@ from typing import Collection, Sequence
 
 from pathlib import PurePosixPath
 
-from common.paths import CONFIG_PATH, ResolvedImage, load_config, setting
+from common.paths import DEFAULT_CONFIG, ResolvedImage, setting
 from common.schema import Checkpoint, Finding, Record, SensorBlock
 from report.derive import SUBSYSTEM_FLAGS, computed_counts, declared_counts
 from report.images import ViewCell, build_view_grid
@@ -79,10 +79,8 @@ class Gap:
     gap_type: GapType
     detail: str
 
-_config = load_config(CONFIG_PATH)
-
 # above this many seconds a reading still renders, but flagged stale.
-MAX_AGE_SECONDS: float = setting(_config, "sensor", "max_age_seconds")
+MAX_AGE_SECONDS: float = setting(DEFAULT_CONFIG, "sensor", "max_age_seconds")
 
 
 # to give out the reason for why the sensor reading can not be used

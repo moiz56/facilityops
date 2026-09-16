@@ -100,15 +100,18 @@ def decimals(config: dict) -> dict[str, int]:
     return dict(block)
 
 
-_config = load_config(CONFIG_PATH)
+#: config/report.yaml, parsed. The settings a module reads at import come from
+#: here, and they come from this file whatever --config says, so there is one
+#: copy rather than one per module that wants a value out of it.
+DEFAULT_CONFIG: dict = load_config(CONFIG_PATH)
 
 #: The two modality markers a filename may carry. Thermal is always marked;
 #: RGB is marked on some routes and unmarked on others, so an unmarked file is
 #: RGB by default.
-THERMAL_SUFFIX: str = setting(_config, "evidence", "thermal_suffix")
-RGB_SUFFIX: str = setting(_config, "evidence", "rgb_suffix")
+THERMAL_SUFFIX: str = setting(DEFAULT_CONFIG, "evidence", "thermal_suffix")
+RGB_SUFFIX: str = setting(DEFAULT_CONFIG, "evidence", "rgb_suffix")
 
-PATH_PREFIX: str = setting(_config, "paths", "path_prefix")
+PATH_PREFIX: str = setting(DEFAULT_CONFIG, "paths", "path_prefix")
 
 
 @dataclass(frozen=True)
@@ -167,7 +170,7 @@ def parse_filename(uri: str, checkpoint_id: str | None = None) -> tuple[str | No
 # compass point, so a filename from any route that does not use compass points
 # yields nothing at all and drops out of the grid entirely:
 #
-# _directions = setting(_config, "evidence", "directions")
+# _directions = setting(DEFAULT_CONFIG, "evidence", "directions")
 # if not isinstance(_directions, list) or not _directions:
 #     raise ConfigError(f"{CONFIG_PATH}: 'evidence.directions' must be a non-empty list")
 # DIRECTIONS: tuple[str, ...] = tuple(_directions)

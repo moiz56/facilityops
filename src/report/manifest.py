@@ -47,15 +47,6 @@ def hash_config(config: dict) -> str:
     return f"sha256:{hashlib.sha256(applied.encode('utf-8')).hexdigest()}"
 
 
-def config_hash(config_path: Path = CONFIG_PATH) -> str:
-    """The hash of one config file. Reads it, then hands it to hash_config.
-
-    Kept separate so a caller that has already read the config does not read it
-    a second time only to hash it.
-    """
-    return hash_config(load_config(config_path))
-
-
 def build_manifest(
     record: Record,
     gaps: list[Gap],
@@ -64,6 +55,7 @@ def build_manifest(
     config_path: Path = CONFIG_PATH,
     provenance: Provenance | None = None,
     pages: PageMap | None = None,
+    config: dict | None = None,
 ) -> dict:
     """Build the manifest for one run.
 
@@ -76,12 +68,17 @@ def build_manifest(
     count, and the first and last page of every section the config turned on.
     Another trailing argument with a default, so 5.3's five-argument call still
     works - without it those two fields are 0 and empty rather than invented.
+
+    `config` is the config the caller has already read, if it has one. The
+    pipeline has: it loads the file once and renders with it, and passing it
+    here is what stops the same file being parsed a second time to hash it.
+    A caller that only wants a manifest still passes a path and nothing else.
     """
     found = [image for images_of in images.values() for image in images_of]
 
     # Read once. The version stamp and the hash must describe the same config,
     # and 4.4 defines the hash as the config as actually applied.
-    config = load_config(config_path)
+    config = load_config(config_path) if config is None else config
     provenance = provenance or stamp(record.run_id, config)
 
     return {

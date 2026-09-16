@@ -48,6 +48,64 @@ If you would rather not install the package, run from the project root with
 
 ---
 
+## What has to be in place to run
+
+Three things: the package, a config file where the package expects it, and a
+run to render.
+
+```
+<project root>/
+  config/
+    report.yaml          REQUIRED - resolved relative to the package, not to you
+    assets/logo.png      optional - a missing logo is logged and left out
+  src/common/  src/report/
+  output/                created on demand
+```
+
+**`config/report.yaml` is not optional and its location is fixed.**
+`common/paths.py` resolves it as `<package>/../../config/report.yaml`, so it is
+found relative to the installed code rather than to your working directory. Six
+settings are read from *that* file when the modules are first imported,
+whatever `--config` says — see [One thing to know about
+`--config`](#one-thing-to-know-about---config). Move or delete it and the
+engine will not import.
+
+**The run is an argument, not a location.** Nothing has to live in `data/`:
+
+```bash
+python -m report.cli \
+    --record       /anywhere/run.json \
+    --evidence-root /anywhere/else \
+    --output-dir    /wherever
+```
+
+What matters is only the relationship between the two paths. A recorded
+evidence path has `paths.path_prefix` stripped and the rest joined to
+`--evidence-root`, so this recorded path:
+
+```
+/run-files/<run_id>/evidence/<Route Name>/<checkpoint_id>/<file>.jpg
+```
+
+must be findable at:
+
+```
+<evidence root>/<run_id>/evidence/<Route Name>/<checkpoint_id>/<file>.jpg
+```
+
+That is the whole contract. The run directory sits one level under the evidence
+root, which is why `--evidence-root data` works for a run stored at
+`data/<run_id>/`, and why each test fixture directory is itself an evidence
+root.
+
+**Created for you:** `data/` and `output/` are made on demand by
+`ensure_runtime_dirs()`. Nothing needs a `.gitkeep`.
+
+**Not required at all:** `data/` — it is git-ignored local convenience, not
+part of the engine. The test suite reads only `tests/test_data/`.
+
+---
+
 ## The pipeline
 
 Seven stages, run in order by `run_pipeline()` in `src/report/cli.py`:

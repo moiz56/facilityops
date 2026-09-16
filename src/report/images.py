@@ -14,20 +14,18 @@ from pathlib import Path
 
 from PIL import Image
 
-from common.paths import CONFIG_PATH, ResolvedImage, load_config, setting
+from common.paths import DEFAULT_CONFIG, ResolvedImage, setting
 
 logger = logging.getLogger("report.images")
-
-_config = load_config(CONFIG_PATH)
 
 #: Longest edge, in pixels, that an image may have when it is embedded (5.5,
 #: TUNABLE). Sixty checkpoints at sixteen full-resolution images each is what
 #: this limit exists to stop.
-MAX_IMAGE_DIMENSION: int = setting(_config, "report", "max_image_dimension")
+MAX_IMAGE_DIMENSION: int = setting(DEFAULT_CONFIG, "report", "max_image_dimension")
 
 #: The most cells the evidence grid puts on a row. A checkpoint that recorded
 #: fewer views uses fewer, so the grid fans out rather than padding (3.2, 5.7).
-GRID_COLUMNS: int = setting(_config, "evidence", "grid_columns")
+GRID_COLUMNS: int = setting(DEFAULT_CONFIG, "evidence", "grid_columns")
 
 
 @dataclass(frozen=True)
@@ -130,13 +128,23 @@ def resize_to_fit(source: Path, image_dir: Path, limit: int = MAX_IMAGE_DIMENSIO
     cost a second JPEG generation and save nothing.
 
     The copy is named from a digest of the source path, so two checkpoints that
-    recorded the same filename cannot overwrite each other's resized copy.
+    recorded the same filename cannot overwrite each other's resized copy - and
+    so a copy this run already made can be recognised and reused. It has to be:
+    the document is laid out twice to settle the contents page numbers, and
+    without that check the second pass re-opens, re-resizes and re-encodes every
+    image the first one produced. `image_dir` is a fresh temporary directory per
+    run, so there is nothing stale to find in it.
 
     Never raises. An image PIL will not resize is embedded at its recorded size
     and the reason logged - 11 asks for a record that does not match section 2
     to be handled rather than to crash, and a large page is a better failure
     than no page.
     """
+    digest = hashlib.sha1(str(source).encode("utf-8")).hexdigest()[:12]
+    destination = image_dir / f"{source.stem}-{digest}{source.suffix}"
+    if destination.exists():
+        return destination
+
     try:
         with Image.open(source) as opened:
             if max(opened.size) <= limit:
@@ -147,8 +155,6 @@ def resize_to_fit(source: Path, image_dir: Path, limit: int = MAX_IMAGE_DIMENSIO
         if resized.mode not in ("RGB", "L") and source.suffix.lower() in (".jpg", ".jpeg"):
             resized = resized.convert("RGB")
 
-        digest = hashlib.sha1(str(source).encode("utf-8")).hexdigest()[:12]
-        destination = image_dir / f"{source.stem}-{digest}{source.suffix}"
         resized.save(destination)
         return destination
     except Exception as error:

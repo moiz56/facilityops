@@ -97,7 +97,7 @@ def run_pipeline(
     # manifest. The same config path the render used, so the version stamp and
     # the config hash describe the config that was actually applied (4.4).
     manifest = build_manifest(
-        record, gaps, images, pdf_path, config_path, provenance, pages,
+        record, gaps, images, pdf_path, config_path, provenance, pages, config,
     )
 
     return Artifacts(
