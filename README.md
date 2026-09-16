@@ -28,6 +28,13 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -e ".[dev]"
 ```
+WeasyPrint needs system libraries (pango, cairo, gdk-pixbuf). On Debian/Ubuntu:
+
+```bash
+sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libcairo2 libgdk-pixbuf-2.0-0
+```
+
+---
 
 Render a run:
 
@@ -1077,13 +1084,6 @@ Pinned exactly in `pyproject.toml`:
 | `pytest` | 8.3.3 | Tests (dev extra) |
 | `pypdf` | 6.18.1 | Reading text and embedded images back out of a rendered PDF (dev extra) |
 
-WeasyPrint needs system libraries (pango, cairo, gdk-pixbuf). On Debian/Ubuntu:
-
-```bash
-sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libcairo2 libgdk-pixbuf-2.0-0
-```
-
----
 
 ## Notes and known edges
 
