@@ -31,11 +31,9 @@ pip install -e ".[dev]"
 WeasyPrint needs system libraries (pango, cairo, gdk-pixbuf). On Debian/Ubuntu:
 
 ```bash
-sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libcairo2 libgdk-pixbuf-2.0-0
+sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 fonts-liberation
 ```
-
 ---
-
 Render a run:
 
 ```bash
