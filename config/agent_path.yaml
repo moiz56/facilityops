@@ -1,0 +1,10 @@
+# Where the agent layer reads from. Paths are relative to the project root.
+#
+# Nothing here is read at import time. main.py opens this file once and passes
+# what it holds down as arguments.
+
+agent:
+  data_dir: data_agent                   # the directory holding the run directories
+  record_patterns:                 # a run keeps its record at one of these
+    - "*/run.json"
+    - "*/records/run.json"

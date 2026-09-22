@@ -4,6 +4,7 @@ venv
 # local run data - created by common.ensure_runtime_dirs().
 # Anchored to the root: tests/data holds committed fixtures and must not match.
 /data/
+/data_agent/
 /output/
 /tests/data
 
