@@ -1,0 +1,101 @@
+# Derivation layer configuration.
+#
+# Every derivation takes its parameters from here, never from a template, a
+# prompt or a caller. Each entry under `derivations` is one named instance: the
+# name is its key in the extended record's `values`, `type` is one of the eight
+# permitted derivations. Any other type raises UnknownDerivationError.
+
+derivation_set_version: "1.0"
+
+significant_figures: 4            # raw numbers are rounded to the field's report.yaml decimals;
+                                   # this is used only for names with no decimals entry (e.g. proportion)
+
+eligibility:                       # the values the section 3.2 rule compares against
+  completed_status: COMPLETED      # condition 1: a checkpoint with any other status contributes nothing
+  connected_status: connected      # condition 2: sensor status, and a sample's own status
+  status_exempt_fields: [status]   # checkpoint fields condition 1 is not applied to, so a
+                                   # MISSED checkpoint still counts when the question is its status
+
+formats:
+  timestamp: "%Y-%m-%dT%H:%M:%S%z" # e.g. 2026-07-28T14:41:20-0700, in the recorded offset
+  date: "{day} {month} {year}"     # e.g. 28 July 2026
+  sample_id: "sample_{index:04d}"  # samples have no id field, so they are named by position
+  sensor_alert_id: "sensor_alert_{index:04d}"   # same for sensor alerts
+
+# Named conditions for condition_count and proportion. A derivation names one
+# with `condition: <name>`; it is never written inline in the derivation.
+#   field:  a top-level attribute of the item the derivation's scope selects
+#           (checkpoints -> Checkpoint, findings -> Finding,
+#           sensor_alerts -> SensorAlert). No dotted paths.
+#   equals: the value that counts as a match, exactly as the record has it
+#           (case matters: FAIL, not fail).
+# Eligibility for "<scope>.<field>" is computed before any derivation runs: an
+# item that does not record `field`, or a checkpoint that is not COMPLETED, is
+# excluded there, not counted as a miss. Fields in
+# eligibility.status_exempt_fields keep MISSED checkpoints in the population.
+# To add a condition, add an entry here, then use its name under a derivation.
+conditions:
+  result_status_is_fail:
+    field: result_status
+    equals: FAIL
+  status_is_completed:
+    field: status
+    equals: COMPLETED
+
+derivations:
+  threshold_compare:               # D1
+    type: threshold_compare
+    scope: a1_back  #for all checkpoints make it 'checkpoints'
+    field_path: environment.temperature_c
+    threshold: 30.0
+    direction: above
+  # D2: counts the items of `scope` in the most recent run for which the named
+  # condition holds. Output: count, matching_ids, population (items the
+  # condition could be checked on) and inputs_excluded (what eligibility left out).
+  condition_count:
+    type: condition_count
+    scope: checkpoints             # checkpoints, findings or sensor_alerts
+    condition: result_status_is_fail   # a name from `conditions` above
+  # D3: share of the items of `scope` in the most recent run for which the
+  # named condition holds. numerator = matching items, denominator = eligible items.
+  proportion:
+    type: proportion
+    scope: checkpoints
+    condition: status_is_completed
+  # D4: mean of `field_path` per group, over the most recent run.
+  # source: samples or checkpoints. group_by: zone (or run_id, kind).
+  # One entry per field; the name is the key in the output.
+  group_mean_vibration_rms_g:
+    type: group_mean
+    field_path: accelerometer.vibration_rms_g
+    source: samples
+    group_by: zone
+  group_mean_temperature_c:
+    type: group_mean
+    field_path: environment.temperature_c
+    source: samples
+    group_by: zone
+  group_mean_pm2_5:
+    type: group_mean
+    field_path: particulate.pm2_5
+    source: samples
+    group_by: zone
+  # D5: maximum of `field_path` per group, over the most recent run, with the
+  # item it came from.
+  group_max:
+    type: group_max
+    field_path: accelerometer.vibration_rms_g
+    source: samples
+    group_by: zone
+  # D6: the `n` highest readings of `field_path` in the most recent run.
+  rank_top_n:
+    type: rank_top_n
+    field_path: accelerometer.vibration_rms_g
+    source: checkpoints
+    n: 10
+  # D7: checkpoints only in the previous run, only in the latest, and in both.
+  run_set_difference:
+    type: run_set_difference
+  # D8: earliest and latest run start times across all runs, and the days between.
+  run_date_range:
+    type: run_date_range

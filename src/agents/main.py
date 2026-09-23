@@ -2,39 +2,39 @@
 
 Config is resolved here and passed down as an argument. No module under
 src/agents reads a config file at import time, so this is the only place one is
-opened.
+opened. Helpers live in utils.py; this file is the pipeline.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
-from collections import Counter
-from dataclasses import fields
 from pathlib import Path
 
 from agents.data_agent import load_corpus
-from agents.derivation import DerivationConfig, EligibleValue, Exclusion, eligible_values
+from agents.derivation import derive, eligible_values
+from agents.utils import (
+    Eligibility,
+    condition_field_paths,
+    derivation_config,
+    print_eligibility,
+    print_runs,
+    sensor_field_paths,
+)
 from common import PROJECT_ROOT
 from common.loader import RecordParseError
 from common.paths import ConfigError, load_config, setting
-from common.schema import Accelerometer, Environment, Particulate
-
-#: The measurement blocks a sensor reading carries, for --all.
-SENSOR_BLOCKS = {
-    "accelerometer": Accelerometer,
-    "environment": Environment,
-    "particulate": Particulate,
-}
 
 #: Where the config files live by default. Locations, not settings: nothing is
 #: read from them until main() runs, and --paths / --report replace them.
 AGENT_PATH_CONFIG = PROJECT_ROOT / "config" / "agent_path.yaml"
 REPORT_CONFIG = PROJECT_ROOT / "config" / "report.yaml"
+DERIVATIONS_CONFIG = PROJECT_ROOT / "config" / "derivations.yaml"
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Load a corpus of run records and report what was read."""
+    """Load a corpus of run records, then run eligibility and the derivations."""
     parser = argparse.ArgumentParser(description="FacilityOps agent layer")
     parser.add_argument(
         "--paths", type=Path, default=AGENT_PATH_CONFIG,
@@ -54,17 +54,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--all", action="store_true",
-        help="run eligible_values on every field of every sensor block",
+        help="run the pipeline: eligible_values on every sensor field, then every derivation",
+    )
+    parser.add_argument(
+        "--hide-eligible", action="store_true",
+        help="compute eligibility as usual but do not print it",
+    )
+    parser.add_argument(
+        "--derivations", type=Path, default=DERIVATIONS_CONFIG,
+        help="derivation config (default: %(default)s)",
     )
     args = parser.parse_args(argv)
 
     try:
         paths = load_config(args.paths)
-        report = load_config(args.report)
-        config = DerivationConfig(
-            subsystem_flags=setting(report, "sensor", "subsystem_flags"),
-            max_age_seconds=setting(report, "sensor", "max_age_seconds"),
-        )
+        derivations = load_config(args.derivations)
+        config = derivation_config(load_config(args.report), derivations)
         data_dir = args.data_dir or PROJECT_ROOT / setting(paths, "agent", "data_dir")
         records = load_corpus(data_dir, setting(paths, "agent", "record_patterns"))
     except (ConfigError, RecordParseError) as error:
@@ -74,84 +79,41 @@ def main(argv: list[str] | None = None) -> int:
     if not records:
         print(f"no run records found under {data_dir}", file=sys.stderr)
         return 1
-
-    for record in records:
-        print(
-            f"{record.run_id}  checkpoints={len(record.checkpoints)}"
-            f"  samples={len(record.sensor_samples)}"
-            f"  findings={len(record.findings)}"
-        )
-    print(f"{len(records)} records, oldest first")
+    print_runs(records)
 
     if args.all:
-        field_paths = [
-            f"{block}.{field.name}"
-            for block, block_type in SENSOR_BLOCKS.items()
-            for field in fields(block_type)
-        ]
+        field_paths = sensor_field_paths() + condition_field_paths(derivations)
     elif args.field:
         field_paths = [args.field]
     else:
         field_paths = []
 
-    # Fields of one block come from one sensor reading, so they are shown together.
-    # Eligibility is still computed per field, as eligible_values is defined.
-    by_block: dict[str, dict[str, tuple[list[EligibleValue], list[Exclusion]]]] = {}
+    # Step 1: eligibility, once per field (sensor fields and the record fields
+    # the conditions read). The derivations use these results and filter nothing.
+    eligibility: Eligibility = {}
     for field_path in field_paths:
-        block, _, name = field_path.partition(".")
         try:
-            by_block.setdefault(block, {})[name] = eligible_values(records, field_path, config)
+            eligibility[field_path] = eligible_values(records, field_path, config)
         except ValueError as error:
             print(f"error: {error}", file=sys.stderr)
             return 1
 
-    for block, results in by_block.items():
-        print_block(block, results)
+    if not args.hide_eligible and eligibility:
+        print_eligibility(eligibility)
+
+    # Step 2: every derivation in the derivation config, over that eligibility.
+    if args.all:
+        try:
+            entries = derivations.get("derivations") or {}
+            derived = {
+                name: derive(entry, records, eligibility, config)
+                for name, entry in entries.items()
+            }
+        except (ConfigError, ValueError) as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 1
+        print(json.dumps(derived, indent=2))
     return 0
-
-
-def print_block(
-    block: str, results: dict[str, tuple[list[EligibleValue], list[Exclusion]]],
-) -> None:
-    """Print one sensor block's eligibility, all its fields side by side.
-
-    A count that is the same for every field is printed once; where the fields
-    differ, each field's count is shown.
-    """
-    names = list(results)
-    print(f"\n{block}  ({', '.join(names)})")
-
-    kept: dict[tuple, Counter] = {}
-    stale: dict[tuple, Counter] = {}
-    excluded: dict[tuple, Counter] = {}
-    for name, (values, exclusions) in results.items():
-        for v in values:
-            key = (v.run_id, v.kind, v.zone)
-            kept.setdefault(key, Counter())[name] += 1
-            stale.setdefault(key, Counter())[name] += v.stale
-        for e in exclusions:
-            key = (e.run_id, e.kind, e.zone, e.scope, e.reason)
-            excluded.setdefault(key, Counter())[name] += e.count
-
-    print("eligible:")
-    for key in sorted(kept, key=str):
-        run_id, kind, zone = key
-        print(f"  {run_id}  {kind:<10}  {zone}  n={together(kept[key], names)}"
-              f"  stale={together(stale[key], names)}")
-
-    print("excluded:" if excluded else "excluded: none")
-    for key in sorted(excluded, key=str):
-        run_id, kind, zone, scope, reason = key
-        print(f"  {run_id}  {kind:<10}  {zone}  scope={scope}"
-              f"  count={together(excluded[key], names)}  reason={reason}")
-
-
-def together(counts: Counter, names: list[str]) -> str:
-    """One number if every field has the same count, else each field's count."""
-    per_field = [counts[name] for name in names]
-    if len(set(per_field)) == 1:
-        return str(per_field[0])
-    return " ".join(f"{name}={n}" for name, n in zip(names, per_field))
 
 
 if __name__ == "__main__":

@@ -53,3 +53,46 @@ Samples have no id field. They are named by position: sample_0000, sample_0001.
 Config
 DerivationConfig carries subsystem_flags and max_age_seconds, built at the
 entry point and passed in. Nothing in derivation.py reads a config file.
+
+
+For D1
+
+In the derivations the scope if its checkpoints its for all of most recent run and if it's 'checkpoint_3' then that specific checkpoint MOST RECENT
+
+For D2 completed as well , though we can have for all runs as well to be discussed MOSTRECENT CAN BE FOR ALL RUNS
+
+## Which runs and inputs each derivation uses (derivation.py)
+
+Records reach the derivations sorted oldest first, so records[-1] is the most
+recent run and records[-2] the one before it.
+
+D1 threshold_compare: most recent run (records[-1])
+Checkpoint readings. scope is one checkpoint id, or "checkpoints" for every
+checkpoint in the run.
+
+D2 condition_count: most recent run (records[-1])
+Items of scope (checkpoints, findings or sensor_alerts), from the eligibility
+for "<scope>.<field>".
+
+D3 proportion: most recent run (records[-1])
+Same inputs as D2. Denominator is every eligible item, numerator the matching
+ones.
+
+D4 group_mean: most recent run (records[-1])
+Telemetry samples, grouped by zone.
+
+D5 group_max: most recent run (records[-1])
+Telemetry samples, grouped by zone.
+
+D6 rank_top_n: most recent run (records[-1])
+Checkpoint readings.
+
+D7 run_set_difference: last two runs (records[-2] as run_a, records[-1] as run_b)
+Checkpoint ids read straight from the two records, not from eligibility. A
+MISSED checkpoint is still on the route, so it counts as present; otherwise a
+miss would look like a change of route.
+
+D8 run_date_range: all runs
+Run start_time. Runs with no start_time are left out of run_count.
+span_days is the difference between the two calendar dates as recorded, each
+in its own offset, with no conversion to UTC.
