@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import Counter
-from dataclasses import dataclass, fields
+from dataclasses import fields
 from datetime import datetime
 from typing import Sequence
 
 from common.paths import ConfigError, setting
 from common.schema import Accelerometer, Checkpoint, Environment, Particulate, Record
+from agents.schema import DerivationConfig, Eligibility, EligibleValue, Exclusion
 
 SENSOR_BLOCKS = {
     "accelerometer": Accelerometer,
@@ -29,68 +32,6 @@ SOURCES = {
     "samples": "sample",
 }
 
-
-# Types
-
-@dataclass(frozen=True)
-class DerivationConfig:
-    """Settings for the derivation layer, built once in main.
-
-    From report.yaml:
-      subsystem_flags:      device flag -> sensor block it governs
-      max_age_seconds:      older checkpoint readings are marked stale
-      decimals:             field name -> decimal places
-    From derivations.yaml:
-      significant_figures:  rounding for raw numbers with no decimals entry
-      conditions:           name -> {field, equals}
-      completed_status:     checkpoint status that passes section 3.2 condition 1
-      connected_status:     sensor and sample status that passes condition 2
-      status_exempt_fields: checkpoint fields condition 1 is not applied to
-      timestamp_format, date_format, sample_id_format, sensor_alert_id_format
-    """
-
-    subsystem_flags: dict[str, str]
-    max_age_seconds: float
-    decimals: dict[str, int]
-    significant_figures: int
-    conditions: dict[str, dict]
-    completed_status: str
-    connected_status: str
-    status_exempt_fields: list[str]
-    timestamp_format: str
-    date_format: str
-    sample_id_format: str
-    sensor_alert_id_format: str
-
-
-@dataclass(frozen=True)
-class EligibleValue:
-    """One value a derivation may use."""
-
-    run_id: str
-    kind: str               # checkpoint, sample, finding or sensor_alert
-    source_id: str          # checkpoint_id, finding_id, or sample_0042 by position
-    zone: str | None
-    timestamp: datetime | None
-    value: object           # a number for sensor fields, the recorded value otherwise
-    stale: bool
-
-
-@dataclass(frozen=True)
-class Exclusion:
-    """Values left out, grouped by run, kind, checkpoint, zone and reason."""
-
-    run_id: str
-    kind: str
-    scope: str | None       # the checkpoint that decided it
-    zone: str | None
-    block: str
-    reason: str
-    count: int
-
-
-# field path -> (eligible values, exclusions)
-Eligibility = dict[str, tuple[list[EligibleValue], list[Exclusion]]]
 
 # Attributes both a value and an exclusion carry, so either can be grouped by them.
 GROUPABLE = {f.name for f in fields(EligibleValue)} & {f.name for f in fields(Exclusion)}
@@ -264,6 +205,67 @@ def no_inputs_reason(record: Record, exclusions: list[Exclusion]) -> str:
     return "no eligible inputs: " + "; ".join(parts) if parts else "no eligible inputs"
 
 
+def excluded_entries(record: Record, eligibility: Eligibility, config: DerivationConfig) -> list[dict]:
+    """The extended record's `excluded` list for one run (section 5.2).
+
+    One entry per checkpoint, block and reason, naming the derivations it
+    affected. A reason that covers every checkpoint in the run becomes a
+    single entry scoped to __run__.
+    """
+    checkpoints = set(cp.checkpoint_id for cp in record.checkpoints)
+    entries: dict[tuple, list[str]] = {}
+
+    for name, entry in config.derivations.items():
+        inputs = entry_inputs(entry, config)
+        if inputs is None:
+            continue
+        field_path, kind = inputs
+        _, exclusions = for_run(*lookup(eligibility, field_path, name), record.run_id, kind)
+
+        scopes_by_reason: dict[tuple, set] = {}
+        for e in exclusions:
+            scopes_by_reason.setdefault((e.block, e.reason), set()).add(e.scope)
+
+        for (block, reason), scopes in scopes_by_reason.items():
+            if checkpoints and scopes >= checkpoints:
+                n = len(checkpoints)
+                keys = [("__run__", block, f"{reason} at every checkpoint that reported it ({n} of {n})")]
+            else:
+                keys = [(scope, block, reason) for scope in sorted(scopes, key=str)]
+            for key in keys:
+                names = entries.setdefault(key, [])
+                if name not in names:
+                    names.append(name)
+
+    return [
+        {"scope": scope, "block": block, "reason": reason, "affected_derivations": names}
+        for (scope, block, reason), names in entries.items()
+    ]
+
+
+def stale_entries(record: Record, eligibility: Eligibility, config: DerivationConfig) -> list[dict]:
+    """The extended record's `stale` list for one run: stale inputs a derivation used."""
+    entries: dict[tuple, list[str]] = {}
+
+    for name, entry in config.derivations.items():
+        inputs = entry_inputs(entry, config)
+        if inputs is None:
+            continue
+        field_path, kind = inputs
+        values, _ = for_run(*lookup(eligibility, field_path, name), record.run_id, kind)
+        block = field_path.split(".", 1)[0]
+        for v in values:
+            if v.stale:
+                names = entries.setdefault((v.source_id, block), [])
+                if name not in names:
+                    names.append(name)
+
+    return [
+        {"scope": scope, "block": block, "affected_derivations": names}
+        for (scope, block), names in entries.items()
+    ]
+
+
 def item_id(scope: str, item: object, index: int, config: DerivationConfig) -> str:
     """Sensor alerts have no id field, so they are named by position."""
     if scope == "checkpoints":
@@ -321,18 +323,30 @@ def sensor_field_paths() -> list[str]:
     ]
 
 
-def condition_field_paths(derivations: dict) -> list[str]:
-    """Record fields the conditions read, e.g. checkpoints.result_status."""
-    conditions = derivations.get("conditions") or {}
-    paths = []
-    for entry in (derivations.get("derivations") or {}).values():
-        condition = conditions.get(entry.get("condition"))
-        if condition and "scope" in entry and "field" in condition:
-            paths.append(f"{entry['scope']}.{condition['field']}")
-    return list(dict.fromkeys(paths))
+def entry_inputs(entry: dict, config: DerivationConfig) -> tuple[str, str | None] | None:
+    """The field path and value kind a derivation entry reads, or None.
+
+    e.g. (environment.temperature_c, "checkpoint") for D1, or
+    (checkpoints.result_status, None) for D2. None for D7 and D8, which read
+    the records directly.
+    """
+    if "condition" in entry:
+        condition = config.conditions.get(entry["condition"]) or {}
+        if "scope" in entry and "field" in condition:
+            return f"{entry['scope']}.{condition['field']}", None
+        return None
+    if "field_path" in entry:
+        return entry["field_path"], SOURCES.get(entry.get("source"))
+    return None
 
 
-def derivation_config(report: dict, derivations: dict) -> DerivationConfig:
+def hash_configs(*configs: dict) -> str:
+    """sha256 over the parsed configs, so comments and spacing don't change it."""
+    text = json.dumps(configs, sort_keys=True, default=str)
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def derivation_config(report: dict, derivations: dict, config_hash: str) -> DerivationConfig:
     decimals = report.get("decimals")
     if not isinstance(decimals, dict):
         raise ConfigError("missing required setting 'decimals'")
@@ -349,6 +363,14 @@ def derivation_config(report: dict, derivations: dict) -> DerivationConfig:
     if not isinstance(exempt, list):
         raise ConfigError("setting 'eligibility.status_exempt_fields' must be a list")
 
+    entries = derivations.get("derivations")
+    if not isinstance(entries, dict):
+        raise ConfigError("missing required setting 'derivations'")
+
+    for key in ("derivation_set_version", "extended_record_version"):
+        if key not in derivations:
+            raise ConfigError(f"missing required setting '{key}'")
+
     return DerivationConfig(
         subsystem_flags=setting(report, "sensor", "subsystem_flags"),
         max_age_seconds=setting(report, "sensor", "max_age_seconds"),
@@ -362,6 +384,11 @@ def derivation_config(report: dict, derivations: dict) -> DerivationConfig:
         date_format=setting(derivations, "formats", "date"),
         sample_id_format=setting(derivations, "formats", "sample_id"),
         sensor_alert_id_format=setting(derivations, "formats", "sensor_alert_id"),
+        computed_at_format=setting(derivations, "formats", "computed_at"),
+        derivations=entries,
+        derivation_set_version=str(derivations["derivation_set_version"]),
+        extended_record_version=str(derivations["extended_record_version"]),
+        config_hash=config_hash,
     )
 
 

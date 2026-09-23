@@ -6,6 +6,7 @@
 # permitted derivations. Any other type raises UnknownDerivationError.
 
 derivation_set_version: "1.0"
+extended_record_version: "1.0"    # version of the extended record's serialised shape
 
 significant_figures: 4            # raw numbers are rounded to the field's report.yaml decimals;
                                    # this is used only for names with no decimals entry (e.g. proportion)
@@ -21,6 +22,7 @@ formats:
   date: "{day} {month} {year}"     # e.g. 28 July 2026
   sample_id: "sample_{index:04d}"  # samples have no id field, so they are named by position
   sensor_alert_id: "sensor_alert_{index:04d}"   # same for sensor alerts
+  computed_at: "%Y-%m-%dT%H:%M:%SZ" # extended record's computed_at, in UTC
 
 # Named conditions for condition_count and proportion. A derivation names one
 # with `condition: <name>`; it is never written inline in the derivation.
@@ -45,7 +47,8 @@ conditions:
 derivations:
   threshold_compare:               # D1
     type: threshold_compare
-    scope: a1_back  #for all checkpoints make it 'checkpoints'
+    source: checkpoints            # scope names checkpoints, so this reads checkpoint readings
+    scope: checkpoints  #for all checkpoints make it 'checkpoints'
     field_path: environment.temperature_c
     threshold: 30.0
     direction: above

@@ -13,15 +13,8 @@ import sys
 from pathlib import Path
 
 from agents.data_agent import load_corpus
-from agents.derivation import derive, eligible_values
-from agents.utils import (
-    Eligibility,
-    condition_field_paths,
-    derivation_config,
-    print_eligibility,
-    print_runs,
-    sensor_field_paths,
-)
+from agents.derivation import compute_eligibility, eligible_values, extend_record
+from agents.utils import derivation_config, hash_configs, print_eligibility, print_runs
 from common import PROJECT_ROOT
 from common.loader import RecordParseError
 from common.paths import ConfigError, load_config, setting
@@ -68,8 +61,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         paths = load_config(args.paths)
+        report = load_config(args.report)
         derivations = load_config(args.derivations)
-        config = derivation_config(load_config(args.report), derivations)
+        config = derivation_config(report, derivations, hash_configs(report, derivations))
         data_dir = args.data_dir or PROJECT_ROOT / setting(paths, "agent", "data_dir")
         records = load_corpus(data_dir, setting(paths, "agent", "record_patterns"))
     except (ConfigError, RecordParseError) as error:
@@ -81,38 +75,30 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print_runs(records)
 
-    if args.all:
-        field_paths = sensor_field_paths() + condition_field_paths(derivations)
-    elif args.field:
-        field_paths = [args.field]
-    else:
-        field_paths = []
-
-    # Step 1: eligibility, once per field (sensor fields and the record fields
-    # the conditions read). The derivations use these results and filter nothing.
-    eligibility: Eligibility = {}
-    for field_path in field_paths:
-        try:
-            eligibility[field_path] = eligible_values(records, field_path, config)
-        except ValueError as error:
-            print(f"error: {error}", file=sys.stderr)
-            return 1
+    # Step 1: eligibility, once per field. The derivations use these results
+    # and filter nothing.
+    try:
+        if args.all:
+            eligibility = compute_eligibility(records, config)
+        elif args.field:
+            eligibility = {args.field: eligible_values(records, args.field, config)}
+        else:
+            eligibility = {}
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
 
     if not args.hide_eligible and eligibility:
         print_eligibility(eligibility)
 
-    # Step 2: every derivation in the derivation config, over that eligibility.
+    # Step 2: the extended record, every derivation over that eligibility.
     if args.all:
         try:
-            entries = derivations.get("derivations") or {}
-            derived = {
-                name: derive(entry, records, eligibility, config)
-                for name, entry in entries.items()
-            }
-        except (ConfigError, ValueError) as error:
+            extended = extend_record(records, config, eligibility)
+        except ValueError as error:
             print(f"error: {error}", file=sys.stderr)
             return 1
-        print(json.dumps(derived, indent=2))
+        print(json.dumps(extended.to_dict(), indent=2))
     return 0
 
 

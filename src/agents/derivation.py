@@ -3,13 +3,58 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime, timezone
 from typing import Sequence
 
 from common.schema import Record
+from agents.schema import (
+    DerivationConfig, DerivedValues, Eligibility, EligibleValue, Exclusion, ExtendedRecord,
+)
 from agents.utils import *
 
 
+# Extended record
+
+def extend_record(
+    records: Sequence[Record], config: DerivationConfig, eligibility: Eligibility | None = None,
+) -> ExtendedRecord:
+    """Run every derivation in config and wrap the results with the records.
+
+    records are oldest first. eligibility is computed here unless the caller
+    already has it (main computes it first so it can print it).
+    Raises UnknownDerivationError for a type outside the eight.
+    """
+    if eligibility is None:
+        eligibility = compute_eligibility(records, config)
+
+    values = {
+        name: derive(entry, records, eligibility, config)
+        for name, entry in config.derivations.items()
+    }
+    excluded = excluded_entries(records[-1], eligibility, config) if records else []
+    stale = stale_entries(records[-1], eligibility, config) if records else []
+
+    return ExtendedRecord(
+        records=tuple(records),
+        derived=DerivedValues(values=values, excluded=excluded, stale=stale),
+        computed_at=datetime.now(timezone.utc).strftime(config.computed_at_format),
+        derivation_set_version=config.derivation_set_version,
+        extended_record_version=config.extended_record_version,
+        config_hash=config.config_hash,
+    )
+
+
 # Eligibility
+
+def compute_eligibility(records: Sequence[Record], config: DerivationConfig) -> Eligibility:
+    """eligible_values for every sensor field and every field a derivation reads."""
+    field_paths = sensor_field_paths()
+    for entry in config.derivations.values():
+        inputs = entry_inputs(entry, config)
+        if inputs:
+            field_paths.append(inputs[0])
+    return {path: eligible_values(records, path, config) for path in dict.fromkeys(field_paths)}
+
 
 def eligible_values(
     records: Sequence[Record], field_path: str, config: DerivationConfig,
@@ -143,7 +188,9 @@ def threshold_compare(
         raise ValueError(f"threshold_compare: direction must be above or below, got {direction!r}")
 
     values, exclusions = for_run(
-        *lookup(eligibility, field_path, "threshold_compare"), records[-1].run_id, "checkpoint",
+        *lookup(eligibility, field_path, "threshold_compare"),
+        records[-1].run_id,
+        source_kind(params, "threshold_compare"),
     )
 
     def compare(cid: str) -> tuple[dict | None, str | None]:
