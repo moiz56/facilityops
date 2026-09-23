@@ -7,7 +7,7 @@ venv
 /data_agent/
 /output/
 /tests/data
-
+/reference_run
 # rendered by the acceptance tests
 /tests/output/
 
