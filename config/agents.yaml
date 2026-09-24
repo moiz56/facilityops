@@ -1,0 +1,10 @@
+# Agent layer settings (section 10.8).
+#
+# Nothing here is read at import time. The entry point opens this file once
+# and passes what it holds down as arguments.
+
+verification:
+  numeric_tolerance: 0.05          # TUNABLE - absolute
+  reject_unclassifiable: true
+  record_tolerance_anomalies: true
+  word_numbers: true

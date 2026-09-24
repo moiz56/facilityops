@@ -11,7 +11,9 @@ from typing import Sequence
 
 from common.paths import ConfigError, setting
 from common.schema import Accelerometer, Checkpoint, Environment, Particulate, Record
-from agents.schema import DerivationConfig, Eligibility, EligibleValue, Exclusion
+from agents.schema import (
+    DerivationConfig, Eligibility, EligibleValue, Exclusion, VerificationConfig,
+)
 
 SENSOR_BLOCKS = {
     "accelerometer": Accelerometer,
@@ -389,6 +391,34 @@ def derivation_config(report: dict, derivations: dict, config_hash: str) -> Deri
         derivation_set_version=str(derivations["derivation_set_version"]),
         extended_record_version=str(derivations["extended_record_version"]),
         config_hash=config_hash,
+    )
+
+
+
+def verification_config(agents: dict, report: dict, derivations: dict) -> VerificationConfig:
+    """agents.yaml verification settings, plus what verification needs from the other two files."""
+    tolerance = setting(agents, "verification", "numeric_tolerance")
+    if isinstance(tolerance, bool) or not isinstance(tolerance, (int, float)) or tolerance < 0:
+        raise ConfigError("setting 'verification.numeric_tolerance' must be a number, 0 or more")
+
+    flags = {}
+    for key in ("reject_unclassifiable", "record_tolerance_anomalies", "word_numbers"):
+        flags[key] = setting(agents, "verification", key)
+        if not isinstance(flags[key], bool):
+            raise ConfigError(f"setting 'verification.{key}' must be true or false")
+
+    decimals = report.get("decimals")
+    if not isinstance(decimals, dict):
+        raise ConfigError("missing required setting 'decimals'")
+
+    return VerificationConfig(
+        numeric_tolerance=float(tolerance),
+        timestamp_format=setting(derivations, "formats", "timestamp"),
+        date_format=setting(derivations, "formats", "date"),
+        decimals=decimals,
+        engine_version=str(setting(report, "provenance", "engine_version")),
+        template_version=str(setting(report, "provenance", "template_version")),
+        **flags,
     )
 
 

@@ -96,3 +96,41 @@ D8 run_date_range: all runs
 Run start_time. Runs with no start_time are left out of run_count.
 span_days is the difference between the two calendar dates as recorded, each
 in its own offset, with no conversion to UTC.
+
+## verify_numeric takes config as a third argument (verification.py)
+
+Section 10.2 gives verify_numeric(text, extended). The verification settings
+(numeric_tolerance, reject_unclassifiable, record_tolerance_anomalies,
+word_numbers) live in agents.yaml, and section 10.3 bans reading config
+anywhere but the entry point. So the signature is
+
+    verify_numeric(text, extended, config: VerificationConfig)
+
+VerificationConfig is built once at the entry point (utils.verification_config)
+and passed in, the same way DerivationConfig is. It also carries:
+- the timestamp and date formats from derivations.yaml, so a timestamp in the
+  text is compared with the record's timestamps formatted the same way
+- decimals from report.yaml, so a record value is compared in its printed form
+- engine_version and template_version from report.yaml provenance, the
+  versions a version token can match (0.1.0, full_report_v1)
+The verifier still takes nothing about its caller: text, record, settings.
+
+Tolerance
+numeric_tolerance is 0.05, absolute (section 6.3, TUNABLE). A token that
+matches a value only within the tolerance, and not exactly, passes and is
+recorded in anomalies.
+Differences up to the tolerance plus 1e-9 pass, so float error cannot fail a
+difference of exactly 0.05. The closest value within the tolerance is the one
+recorded, as source_field and source_value.
+
+What verify_numeric returns
+- position is the token's character offset in the text.
+- method is template_slot_fill and regeneration_attempts is 0. The verifier
+  does not know how the text was produced or how many tries it took; the
+  caller sets both.
+- passed is true only with no failures and emitted == verified. No tokens is
+  a pass.
+- An unclassifiable token fails. If reject_unclassifiable is off it is let
+  through and listed in anomalies instead, never silently.
+- Telemetry samples are not matched directly: text reaches them only through
+  a derivation, which carries the value it used.

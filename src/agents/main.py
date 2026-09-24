@@ -14,7 +14,10 @@ from pathlib import Path
 
 from agents.data_agent import load_corpus
 from agents.derivation import compute_eligibility, eligible_values, extend_record
-from agents.utils import derivation_config, hash_configs, print_eligibility, print_runs
+from agents.utils import (
+    derivation_config, hash_configs, print_eligibility, print_runs, verification_config,
+)
+from agents.verification import verify_numeric
 from common import PROJECT_ROOT
 from common.loader import RecordParseError
 from common.paths import ConfigError, load_config, setting
@@ -24,6 +27,7 @@ from common.paths import ConfigError, load_config, setting
 AGENT_PATH_CONFIG = PROJECT_ROOT / "config" / "agent_path.yaml"
 REPORT_CONFIG = PROJECT_ROOT / "config" / "report.yaml"
 DERIVATIONS_CONFIG = PROJECT_ROOT / "config" / "derivations.yaml"
+AGENTS_CONFIG = PROJECT_ROOT / "config" / "agents.yaml"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -57,6 +61,18 @@ def main(argv: list[str] | None = None) -> int:
         "--derivations", type=Path, default=DERIVATIONS_CONFIG,
         help="derivation config (default: %(default)s)",
     )
+    parser.add_argument(
+        "--output", type=Path, default=None,
+        help="where to write the extended record; overrides agent.extended_record",
+    )
+    parser.add_argument(
+        "--agents", type=Path, default=AGENTS_CONFIG,
+        help="agent config holding the verification settings (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--verify", metavar="TEXT", default=None,
+        help="build the extended record, then verify the numeric tokens in TEXT against it",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -64,8 +80,10 @@ def main(argv: list[str] | None = None) -> int:
         report = load_config(args.report)
         derivations = load_config(args.derivations)
         config = derivation_config(report, derivations, hash_configs(report, derivations))
+        verification = verification_config(load_config(args.agents), report, derivations)
         data_dir = args.data_dir or PROJECT_ROOT / setting(paths, "agent", "data_dir")
         records = load_corpus(data_dir, setting(paths, "agent", "record_patterns"))
+        output = args.output or PROJECT_ROOT / setting(paths, "agent", "extended_record")
     except (ConfigError, RecordParseError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -78,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     # Step 1: eligibility, once per field. The derivations use these results
     # and filter nothing.
     try:
-        if args.all:
+        if args.all or args.verify:
             eligibility = compute_eligibility(records, config)
         elif args.field:
             eligibility = {args.field: eligible_values(records, args.field, config)}
@@ -88,17 +106,25 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {error}", file=sys.stderr)
         return 1
 
-    if not args.hide_eligible and eligibility:
+    if not args.hide_eligible and not args.verify and eligibility:
         print_eligibility(eligibility)
 
     # Step 2: the extended record, every derivation over that eligibility.
-    if args.all:
+    if args.all or args.verify:
         try:
             extended = extend_record(records, config, eligibility)
         except ValueError as error:
             print(f"error: {error}", file=sys.stderr)
             return 1
-        print(json.dumps(extended.to_dict(), indent=2))
+        if args.all:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(extended.to_dict(), indent=2) + "\n", encoding="utf-8")
+            print(f"extended record written to {output}")
+
+        # Step 3: verification, run by hand until the agents call it.
+        if args.verify:
+            result = verify_numeric(args.verify, extended, verification)
+            print(json.dumps(result.to_dict(), indent=2))
     return 0
 
 

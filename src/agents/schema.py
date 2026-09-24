@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 
 from common.schema import Record
 
@@ -152,4 +153,85 @@ class ExtendedRecord:
             "values": self.derived.values,
             "excluded": self.derived.excluded,
             "stale": self.derived.stale,
+        }
+
+
+@dataclass(frozen=True)
+class VerificationConfig:
+    """Every setting verify_numeric needs, read from config once.
+
+    Built by:  utils.verification_config, called from the entry point.
+    Passed to: verification.verify_numeric, as its third argument.
+
+    From agents.yaml verification:
+      numeric_tolerance, reject_unclassifiable, record_tolerance_anomalies,
+      word_numbers
+    From derivations.yaml formats:
+      timestamp_format, date_format: so a timestamp in the text is compared
+      with the record's timestamps formatted the same way
+    From report.yaml:
+      decimals: so a record value is compared in the form it is printed in
+      engine_version, template_version: the provenance a version token can match
+    """
+
+    numeric_tolerance: float
+    reject_unclassifiable: bool
+    record_tolerance_anomalies: bool
+    word_numbers: bool
+    timestamp_format: str
+    date_format: str
+    decimals: dict[str, int]
+    engine_version: str
+    template_version: str
+
+
+class TokenClass(StrEnum):
+    """The token taxonomy of section 6.2. Returned by verification.classify_token."""
+
+    MEASUREMENT = "measurement"
+    COUNT = "count"
+    IDENTIFIER = "identifier"
+    TIMESTAMP = "timestamp"
+    VERSION = "version"
+    ORDINAL = "ordinal"
+    UNVERIFIABLE = "unverifiable"
+
+
+@dataclass(frozen=True)
+class VerificationResult:
+    """What verify_numeric found in a piece of text.
+
+    Built by: verification.verify_numeric.
+    Read by:  the agents and the envelope, not written yet.
+
+    by_class:    class name -> number of tokens of that class, all seven keys
+    failures:    {token, class, position, reason} per token that did not verify
+    anomalies:   {token, class, position, source_field, source_value} per token
+                 that verified only because of the tolerance; {token, class,
+                 position, reason} for an unclassifiable token let through
+                 because reject_unclassifiable is off
+    """
+
+    method: str                     # template_slot_fill or deterministic
+    passed: bool
+    tokens_emitted: int
+    tokens_verified: int
+    by_class: dict[str, int]
+    derived_values_used: list[str]
+    regeneration_attempts: int
+    failures: list[dict]
+    anomalies: list[dict]
+
+    def to_dict(self) -> dict:
+        """The serialised shape in section 6.5."""
+        return {
+            "method": self.method,
+            "passed": self.passed,
+            "tokens_emitted": self.tokens_emitted,
+            "tokens_verified": self.tokens_verified,
+            "by_class": self.by_class,
+            "derived_values_used": self.derived_values_used,
+            "regeneration_attempts": self.regeneration_attempts,
+            "failures": self.failures,
+            "anomalies": self.anomalies,
         }

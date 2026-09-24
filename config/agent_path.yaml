@@ -8,3 +8,4 @@ agent:
   record_patterns:                 # a run keeps its record at one of these
     - "*/run.json"
     - "*/records/run.json"
+  extended_record: output/extended_record.json   # where --all writes the extended record
