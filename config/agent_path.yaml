@@ -9,3 +9,5 @@ agent:
     - "*/run.json"
     - "*/records/run.json"
   extended_record: output/extended_record.json   # where --all writes the extended record
+  database: output/b1_database.sqlite   # B-1's database, kept between runs; rebuilt when what it is built from changes
+  b1_answers: output/b1_answers          # --ask writes one PDF per question here

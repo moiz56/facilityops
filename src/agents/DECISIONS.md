@@ -66,25 +66,56 @@ For D2 completed as well , though we can have for all runs as well to be discuss
 Records reach the derivations sorted oldest first, so records[-1] is the most
 recent run and records[-2] the one before it.
 
-D1 threshold_compare: most recent run (records[-1])
-Checkpoint readings. scope is one checkpoint id, or "checkpoints" for every
-checkpoint in the run.
+D1-D6 run once for every run, not just the latest. Each instance's value in
+the extended record is a list, one output per run, oldest first, and each
+output carries the run_id it was computed from, straight after "derivation".
+A run with no eligible inputs gets its own NOT_COMPUTABLE entry with its
+run_id; the other runs are unaffected.
 
-D2 condition_count: most recent run (records[-1])
+The extended record's excluded and stale lists cover every run too: one flat
+list each, oldest run first, every entry starting with its run_id. A __run__
+scope means every checkpoint of that entry's run.
+
+D1 threshold_compare: every run, one output each
+Checkpoint readings. scope is one checkpoint id, or "checkpoints" for every
+checkpoint in the run. Each checkpoint's result carries its checkpoint_name,
+OK or NOT_COMPUTABLE, taken from its first entry in the run (the user asked
+for it; it is not in the brief's D1 keys). It is stored in d1_checkpoints and,
+for a single-checkpoint scope, on the d1_threshold_compare row.
+
+D2 condition_count: every run, one output each
 Items of scope (checkpoints, findings or sensor_alerts), from the eligibility
 for "<scope>.<field>".
+Beyond the brief (user asked, 2026-09-29): each output also carries
+excluded_items, one {item_id, reason, count} per item and reason eligibility
+left out, straight from its Exclusion entries: no new reasons. item_id is the
+checkpoint_id, None for findings and sensor alerts (eligibility does not name
+them). The counts sum to inputs_excluded. In the database: d2_excluded_items.
 
-D3 proportion: most recent run (records[-1])
+D3 proportion: every run, one output each
 Same inputs as D2. Denominator is every eligible item, numerator the matching
 ones.
 
-D4 group_mean: most recent run (records[-1])
+D4 group_mean: every run, one output each
 Telemetry samples, grouped by zone.
+Beyond the brief (user asked, 2026-09-29): grouped per zone, each group also
+carries checkpoints: [{checkpoint_id, checkpoint_name}], the run's checkpoints
+whose own zone is that group's key (first entry per id, route order; [] when
+none), so a question about a checkpoint finds its zone's mean. The mean is
+still the zone's, over every reading in it. In the database:
+d4_<instance>_checkpoints.
 
-D5 group_max: most recent run (records[-1])
+D5 group_max: every run, one output each
 Telemetry samples, grouped by zone.
+Beyond the brief (user asked, 2026-09-29): as for D4, grouped per zone, each
+group carries checkpoints: [{checkpoint_id, checkpoint_name}] (utils.
+add_zone_checkpoints, shared with D4). In the database:
+d5_<instance>_checkpoints. derivations.yaml groups D5 per run_id for now, so
+it stays empty until an instance is grouped per zone.
+D5 groups also carry inputs_stale, as D4's do, so the two have the same keys
+apart from the figure itself (user asked, 2026-09-29).
 
-D6 rank_top_n: most recent run (records[-1])
+D6 rank_top_n: every run, one output each
 Checkpoint readings.
 
 D7 run_set_difference: last two runs (records[-2] as run_a, records[-1] as run_b)
@@ -96,6 +127,13 @@ D8 run_date_range: all runs
 Run start_time. Runs with no start_time are left out of run_count.
 span_days is the difference between the two calendar dates as recorded, each
 in its own offset, with no conversion to UTC.
+
+Beyond the brief (user asked, 2026-09-29): D8 also carries earliest_run_id,
+latest_run_id, runs_without_start, day_count, days_without_run (days in the
+span, both ends included, with no run) and days: one entry per day a run
+started on, oldest first, with date (YYYY-MM-DD), date_formatted, weekday,
+run_count and run_ids. Days use the same recorded-offset dates as span_days.
+In the database: d8_run_date_range's new columns, d8_days and d8_day_runs.
 
 ## verify_numeric takes config as a third argument (verification.py)
 
@@ -134,3 +172,267 @@ What verify_numeric returns
   through and listed in anomalies instead, never silently.
 - Telemetry samples are not matched directly: text reaches them only through
   a derivation, which carries the value it used.
+
+Identifiers
+Only identifiers have an underscore in their name, so any word with one is a
+token and is classed as an identifier: home_docking_station, checkpoint_1,
+group_mean_temperature_c. Letters mixed with digits (cap0142) are identifiers
+too. A word with neither is not a token. The referent must exist: a string
+in the records or extended record, a field name, a key in a derived value,
+or a part of a dotted field path (environment.temperature_c gives
+environment and temperature_c). A made-up zone or checkpoint name fails.
+These count in tokens_emitted and by_class.identifier like any other token.
+
+## verify_numeric can be given the filled slots (verification.py)
+
+Beyond section 6, which checks each token on its own against the records.
+verify_numeric(text, extended, config, slots=()) takes, optionally, the slots
+fill_slots placed in the text. A token inside a slot whose source field holds
+text, where the slot's span is exactly that text, is confirmed by that field:
+"A5" in "Rack A5 (back)" at records[1].checkpoints[3].checkpoint_name. Every
+other token is checked as before.
+
+Why: a recorded name holds letters mixed with digits that are not ids on
+their own. Checked alone, "A5" matches nothing and the answer is refused
+though every value came from the records; "1" in "Checkpoint 1" passed only
+because some count happened to be 1. The check is still against a source
+field, the one the citation names, not a skip. Without slots (the brief's
+call) the behaviour is unchanged.
+
+## fill_slots (slots.py)
+
+Signature
+fill_slots(template, extended, config: DerivationConfig). Section 7.1 gives two
+arguments, but record floats and timestamps need decimals and the timestamp
+format, and section 10.3 bans reading config in the module. The same reason
+verify_numeric takes a third argument. Passing DerivationConfig lets slots
+reuse utils.format_value and format_timestamp, so formatting lives in one
+place (section 7.3).
+
+Template
+The brief does not define Template or FilledTemplate.
+- Template: name, text with {{ slot_id }} placeholders, and slots, a map of
+  slot_id -> source path. The agent supplies the paths, because they depend on
+  the record: which zones exist, which checkpoint is meant.
+- FilledTemplate: name, filled text, and the FilledSlot manifest (section 7.2).
+The .j2 files are filled by our own substitution, not rendered by Jinja: Jinja
+renders the whole text at once and cannot say where each value landed. Spans
+are recorded as each value is placed, never found by searching afterwards.
+
+Paths
+Dotted, with [i] for list positions, starting at the extended record:
+derived.values.group_max[2].groups.checkpoint_1.max, or
+records[0].checkpoints[2].sensor.environment.temperature_c. The same form the
+verifier reports as source_field.
+
+Formatting, in order
+1. A value with a *_formatted sibling uses it (every derived number has one).
+2. Strings as they are; whole numbers as they are (counts).
+3. Record floats: report.yaml decimals, through utils.format_value. A field
+   with no decimals entry is an error, not a guess.
+4. Record timestamps: utils.format_timestamp.
+5. A list of ids: joined with ", ".
+A true/false value is refused: the template says it in words.
+A path ending at a group (a dict under a name) prints the name, its last key:
+...groups.home_docking_station -> "home_docking_station". A zone name exists
+only as a key, so this is how a template cites it.
+
+MissingSlotError
+Raised for a placeholder with no path, a path that finds nothing, a None, or
+an empty string or list. A NOT_COMPUTABLE value has no mean/max key, so a slot
+pointing at one raises rather than printing a blank.
+
+## build_database (database.py)
+
+The extended record as an in-memory SQLite database (standard library, no
+file), for B-1 to query. Built after extend_record from the extended record
+and the eligibility it used, rebuilt whenever the extended record is. Nothing
+is computed here; every value is copied.
+
+Signature
+build_database(extended, eligibility, config: DerivationConfig). eligibility
+fills readings, so the exclusion rule is not applied a second time. config
+gives the timestamp format and which flag governs which block.
+
+Only eligible values
+readings holds checkpoint sensor values that passed the exclusion rule. An
+excluded value has no row, so no query can select it; exclusions says why.
+Telemetry samples are not tables: they reach an answer through a derivation.
+
+Keys
+Rows from a record list are keyed by position, never by id: checkpoint and
+finding ids can repeat. checkpoints has one integer key, checkpoint_row, that
+evidence, sensor_flags and readings reference. A reference the record only
+claims (a finding's checkpoint_id, an alert's nearest checkpoint, ids inside
+derived values) is a plain column with no foreign key, so odd data is kept,
+not refused. Foreign keys are enforced: a violation is a builder bug.
+
+path
+Every row carries its place in the extended record, the form fill_slots
+takes. For a row that is one object, a column's source is path + "." + column;
+for a row that is one value (a reading, an image, a listed id) path points at
+the value. A group whose key is None (samples with no zone) has no path: the
+path form cannot name it.
+
+Derived values
+derivations holds one row per output (D1-D6 per run, D7 and D8 once), with
+each scalar key as a column of the same name. NOT_COMPUTABLE outputs are rows
+with status and reason. Per-checkpoint and per-group results go to
+derivation_items, rank_top_n's ranking to derivation_ranking, id lists to
+derivation_ids. *_formatted strings are left out: fill_slots finds them from
+the number's path. An output key with no column fails the build.
+
+Left out
+event_log, live_detections, checkpoint detections (the same shape as
+findings), coordinates, raw sensor duplicates, sensor warnings, stale (the
+readings table has a stale column).
+
+## run_query (database.py)
+
+run_query(conn, sql, max_rows, timeout_seconds) -> (columns, rows). The limits
+are enforced by SQLite, not asked of the model:
+- The authorizer allows reading tables and calling ALLOWED_FUNCTIONS (count,
+  min, max, lower, upper, like, coalesce). Everything else is denied: writes,
+  schema changes, PRAGMA, ATTACH, transactions, recursive queries, and every
+  other function (avg, sum, round, date functions, load_extension, ...).
+- PRAGMA query_only is set once the database is built, a second lock on writes.
+- One statement only; sqlite3 refuses a second.
+- A query past timeout_seconds is interrupted; one returning more than
+  max_rows fails. Neither comes back cut short.
+Every failure is a QueryError with a readable reason. max_rows and
+timeout_seconds are agents.yaml database settings, passed in.
+
+What the guard does not stop: arithmetic operators (value - 30) and a count
+in the SELECT list. Those make numbers that are not in the extended record.
+The guard is for safety; number integrity stays with the verifier and with
+citations: a result column with no path cannot fill a slot.
+
+## B-1 analytical (b1_analytical.py, provider.py)
+
+Three model calls: the router names the runs, checkpoints and derivations a
+question is about (b1_analytical_router); the SQL writer for the routed
+derivation's type writes one SELECT over its tables (routes/); the prose
+writer writes a lead-in (b1_analytical_prose). Code does everything else.
+
+Safeguards, in the order they run
+- The question is length-capped. The router's runs and checkpoints must be
+  ones the records hold; a query returning any other run or checkpoint is sent
+  back. Runs are named by position (1 oldest, -1 latest) or by the day they
+  started, "YYYY-MM-DD" or a span "first/last", matched on start_time's date
+  in the run's own offset. A position or day no run has abstains.
+- The SELECT runs through run_query: read-only, allowed functions only, row
+  limit and timeout.
+- Every shown cell is traced to the extended-record path holding exactly that
+  value, through the row's path columns. A cell that does not trace (a
+  computed or renamed value) sends the query back.
+- Code writes the answer's facts as a template: grouped by run, the run's id
+  as a heading line once, then one "- column {{ slot }}, ..." line per row.
+  fill_slots fills it, so every value has a span and a source_field; citations
+  are those, never searched for afterwards.
+- The prose writer sees the question and the filled facts, fenced and declared
+  data (TB-10), and writes only a lead-in of a sentence or two that goes above
+  them. Its reply may hold no value at all: no digit, number or ordinal word,
+  id, or braces, and at most 300 characters. The facts follow it unchanged.
+- verify_numeric checks the whole answer, lead-in and facts, given the slots.
+A bad reply goes back with the reason, up to max_attempts. A router or SQL
+writer that never passes: REFUSED_UNVERIFIABLE with nothing shown. A prose
+writer that never passes, or a provider failure there: the facts alone,
+DEGRADED_TEMPLATE_ONLY. A provider failure before that: PROVIDER_UNAVAILABLE.
+
+Beyond the brief: the model does not write around the values
+Section 8's order is fill_slots -> generate_prose, the model returning prose
+around the filled values. Earlier the prose writer wrote the whole answer as a
+template of {{ slot }} placeholders instead. With many rows it cited other
+rows' slots for the wrong run, folded rows into "multiple checkpoints
+including", and kept tripping the no-value rules. Now code writes and fills
+every fact, in order, and the model writes only the lead-in, which holds no
+value, so it cannot misstate, misplace or drop one. The user asked for the
+brief to be exceeded where it improves results.
+
+Output
+answer, citations (claim_span, source_field), records_consulted: the runs the
+cited values came from. derived_values_used comes from the slot paths, not
+from the verifier's first match. An empty cell reads "not recorded".
+
+Provider
+Gemini or Claude, chosen by agents.yaml provider.name, both over REST with
+urllib, no SDK. Key from GEMINI_API_KEY / ANTHROPIC_API_KEY only, never
+agents.yaml; main loads them from .env (gitignored) when the shell has not. Claude is sent the configured temperature,
+so its model must be one that accepts it (Opus 5, Sonnet 5 and Opus 4.7+ reject
+temperature with a 400). Kept out of ProviderConfig's repr. Retries
+timeouts, 429 and 5xx with backoff; other errors fail at once. A blocked or
+cut-off reply is an error, not an answer.
+
+Beyond the brief: JSON replies held to a schema
+complete() takes an optional JSON schema (the brief's complete(prompt) still
+works). Given one, the provider's structured output mode holds the reply to
+it: Claude's output_config.format, Gemini's responseJsonSchema. The router,
+the SQL writer and B-2's order pass one; prose replies do not. Replies often
+broke the JSON shape the prompt asked for, and each break cost a retry. Every
+key is required, so an abstain fills the others with empty values, which are
+ignored. The parsers still check every reply.
+
+## Envelope (envelope.py)
+
+One function wraps every agent's output in section 9's shape. It refuses a
+status outside the closed set, and an OK whose verification did not pass, so
+no caller can mislabel a result. agent_version is a constant in the module,
+not config: it versions the code.
+
+## B-2 narrative (b2_narrative.py)
+
+Code writes every sentence; the model only orders the executive summary's
+facts (section 1.1: "salience and ordering"). Each sentence is a Jinja macro
+in templates/ that receives slot placeholders, never values; fill_slots then
+fills them, so each value has a span and a citation.
+- The model sees what each fact is about (a fixed description, and "nothing
+  to report" when a tally is zero), never its text. It returns an order that
+  must list every fact once. Record text never reaches it (TB-10).
+- Provider down, or no valid order after max_attempts: code's order is used
+  and the summary is DEGRADED_TEMPLATE_ONLY. Never a partial document.
+- coverage, section_intro and item_note make no model call: OK, model null,
+  method deterministic.
+- Every count B-2 states is a derivation (derivations.yaml gained counts for
+  completed, missed, passed and warned checkpoints, abstained findings, and
+  critical and warning alerts), found by what it counts, not by name. A
+  declared count is compared with it; where they differ, both are stated and
+  called a disagreement (section 10.6).
+- A section that fails verification is REFUSED_UNVERIFIABLE with no text.
+Open: the 150-250 word target for the summary is not enforced; the result
+counts leave out MISSED checkpoints (eligibility rule 1) while the report
+engine's coverage page counts all of them; record text with numbers in it
+(a reason reading "8 of 8") fails verification.
+
+## B-3 action plan (b3_action.py, action_mapping.yaml)
+
+Deterministic by default (prose: false): no provider call, OK, model null,
+method deterministic. The action is always the finding's own
+recommended_action, verbatim.
+- Category from action_mapping.yaml by feature. A feature not listed is
+  unmapped and stated as such; nothing is inferred from similar names
+  (airflow_obstruction stays unmapped).
+- Grouping: by feature and action text. Two findings of one feature with
+  different texts are two actions, because B-3 may not merge texts. A finding
+  id listed twice counts once.
+- A mapped feature whose finding has no recommended_action goes to unmapped,
+  stated as "No recommended action is recorded for finding type X."
+- Priority: a dense rank of (severity rank of the group's most severe
+  finding, category rank, first route position of its checkpoints). Equal
+  keys share a priority. A severity the mapping does not know ranks after
+  info. Category ranks are TUNABLE: airflow 1, review_evidence 2,
+  sensor_review 3, recapture 4.
+- finding_count is the length of the action's own referencing_findings. The
+  text names checkpoints and findings instead of stating a count, because
+  counting per feature would be arithmetic outside the derivation layer and
+  features are an open set.
+- Output adds "text" (the plan rendered from b3_action.j2) beside actions,
+  unmapped and citations, so claim_span has a text to point into. The
+  contract shape lists no text field; this is a deliberate addition, to raise
+  with the client.
+- Trend statements are not made. Section 8.4 allows them ("may"), but a
+  trend needs values compared across runs, which is a ninth derivation, and
+  section 17 bans "rising". Silence complies; raised for the client.
+- prose: true adds one opening sentence from the model. It may hold no
+  number, name or characterising word (checked with the verifier's own token
+  extractor); otherwise DEGRADED_TEMPLATE_ONLY with no sentence.
+

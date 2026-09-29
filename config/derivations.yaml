@@ -4,6 +4,8 @@
 # prompt or a caller. Each entry under `derivations` is one named instance: the
 # name is its key in the extended record's `values`, `type` is one of the eight
 # permitted derivations. Any other type raises UnknownDerivationError.
+# D1-D6 run once for every run: their output is a list, oldest run first, each
+# entry carrying its run_id. D7 and D8 compare runs and give one output.
 
 derivation_set_version: "1.0"
 extended_record_version: "1.0"    # version of the extended record's serialised shape
@@ -52,50 +54,78 @@ derivations:
     field_path: environment.temperature_c
     threshold: 30.0
     direction: above
-  # D2: counts the items of `scope` in the most recent run for which the named
+  # D2: counts the items of `scope` in each run for which the named
   # condition holds. Output: count, matching_ids, population (items the
   # condition could be checked on) and inputs_excluded (what eligibility left out).
   condition_count:
     type: condition_count
     scope: checkpoints             # checkpoints, findings or sensor_alerts
     condition: result_status_is_fail   # a name from `conditions` above
-  # D3: share of the items of `scope` in the most recent run for which the
+  # D3: share of the items of `scope` in each run for which the
   # named condition holds. numerator = matching items, denominator = eligible items.
   proportion:
     type: proportion
     scope: checkpoints
     condition: status_is_completed
-  # D4: mean of `field_path` per group, over the most recent run.
-  # source: samples or checkpoints. group_by: zone (or run_id, kind).
-  # One entry per field; the name is the key in the output.
+  # D4: mean of `field_path` per group, in each run. One entry per field.
+  #   name:       any name of letters, digits and _; it is the key in the
+  #               extended record's values (and B-1's table d4_<name>)
+  #   field_path: a sensor field, block.field, e.g. environment.humidity_pct.
+  #               Needs a decimals entry in report.yaml.
+  #   source:     samples (the continuous telemetry) or checkpoints (one
+  #               reading per checkpoint stop)
+  #   group_by:   zone (a mean per zone), run_id (one mean for the whole run)
+  #               or kind (sample or checkpoint)
   group_mean_vibration_rms_g:
     type: group_mean
     field_path: accelerometer.vibration_rms_g
-    source: samples
+    source: checkpoints
     group_by: zone
   group_mean_temperature_c:
     type: group_mean
     field_path: environment.temperature_c
-    source: samples
+    source: checkpoints
     group_by: zone
   group_mean_pm2_5:
     type: group_mean
     field_path: particulate.pm2_5
-    source: samples
+    source: checkpoints
     group_by: zone
-  # D5: maximum of `field_path` per group, over the most recent run, with the
-  # item it came from.
-  group_max:
+  # D5: maximum of `field_path` per group, in each run, with the item it
+  # came from (source_id, source_timestamp; tied_with on a tie). One entry
+  # per field. Configured like D4: name, field_path, source, group_by.
+  group_max_vibration_rms_g:
     type: group_max
     field_path: accelerometer.vibration_rms_g
-    source: samples
+    source: checkpoints
     group_by: zone
-  # D6: the `n` highest readings of `field_path` in the most recent run.
-  rank_top_n:
+  group_max_temperature_c:
+    type: group_max
+    field_path: environment.temperature_c
+    source: checkpoints
+    group_by: zone
+  group_max_pm2_5:
+    type: group_max
+    field_path: particulate.pm2_5
+    source: checkpoints
+    group_by: zone
+  # D6: the `n` highest readings of `field_path` in each run. One entry per
+  # field, like D4 and D5: name, field_path, source, n.
+  rank_top_n_vibration_rms_g:
     type: rank_top_n
     field_path: accelerometer.vibration_rms_g
     source: checkpoints
-    n: 10
+    n: 5
+  rank_top_n_temperature_c:
+    type: rank_top_n
+    field_path: environment.temperature_c
+    source: checkpoints
+    n: 5
+  rank_top_n_pm2_5:
+    type: rank_top_n
+    field_path: particulate.pm2_5
+    source: checkpoints
+    n: 5
   # D7: checkpoints only in the previous run, only in the latest, and in both.
   run_set_difference:
     type: run_set_difference

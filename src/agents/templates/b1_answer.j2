@@ -1,0 +1,133 @@
+{# B-1's answer to one question, as a one-document PDF.
+
+   Rendered by b1_answer_pdf.write_answer_pdf and set in the report's own
+   stylesheet (src/report/templates, branding.stylesheet), so the answer reads
+   as part of the same set of documents: the cover's title block, label/value
+   panels for the facts about the answer, and ruled tables for what it cites.
+
+   Every value in the answer is marked and numbered; its number leads to the
+   citations table, which says which run it is about and where it is in the
+   records. Nothing on this page is written by the model except the answer's
+   lead-in sentence, which holds no values: the facts under it, citations,
+   runs and checks are all written by code. #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Question: {{ question }}</title>
+</head>
+<body>
+
+<section class="section cover b1-answer" id="answer">
+
+  <h1>Question and answer</h1>
+  {% if facility %}
+    <p class="cover-facility-id">{{ facility }}</p>
+  {% endif %}
+
+  <table class="detail-table">
+    <tr><th>Question</th><td>{{ question }}</td></tr>
+    <tr><th>Answered</th><td>{{ generated_at }}</td></tr>
+    <tr><th>Status</th><td><span class="badge badge-small badge-{{ status_style }}">{{ status }}</span></td></tr>
+    <tr><th>Runs consulted</th><td>{{ runs | length }}</td></tr>
+  </table>
+
+  <h2>Answer</h2>
+  {% if answer %}
+    <p class="b1-answer-text">
+      {%- for part in answer -%}
+        {%- if part.n -%}
+          <span class="b1-cited">{{ part.text }}</span><sup class="b1-ref">{{ part.n }}</sup>
+        {%- else -%}
+          {{ part.text }}
+        {%- endif -%}
+      {%- endfor -%}
+    </p>
+    {% if degraded %}
+      <p class="absent-strong">
+        The answer is the query's rows as code set them out: {{ reason }}.
+      </p>
+    {% endif %}
+  {% else %}
+    <p class="absent-strong">No answer is shown. {{ reason }}</p>
+  {% endif %}
+
+  {% if citations %}
+    <h2>Where each value comes from</h2>
+    <p class="lede">
+      Each numbered value in the answer, the run it is about, and its place in
+      the records. Every one was filled from that place by code.
+    </p>
+    <table class="data-table b1-citations">
+      <thead>
+        <tr><th class="figure">#</th><th>Value</th><th>Run</th><th>Source</th></tr>
+      </thead>
+      <tbody>
+        {% for c in citations %}
+          <tr>
+            <td class="figure">{{ c.n }}</td>
+            <td>{{ c.text }}</td>
+            <td><span class="gap-tag">{{ c.run }}</span></td>
+            <td><span class="gap-tag">{{ c.source_field }}</span></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  {% if runs %}
+    <h2>Runs consulted</h2>
+    <table class="data-table">
+      <thead>
+        <tr><th>Run</th><th>Started</th><th>Final status</th></tr>
+      </thead>
+      <tbody>
+        {% for run in runs %}
+          <tr>
+            <td><span class="gap-tag">{{ run.run_id }}</span></td>
+            <td>{{ run.start_time }}</td>
+            <td><span class="badge badge-small badge-{{ run.status_style }}">{{ run.final_status }}</span></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  <h2>Verification</h2>
+  {% if verification %}
+    <table class="detail-table">
+      <tr><th>Result</th><td>
+        <span class="badge badge-small badge-{{ 'pass' if verification.passed else 'fail' }}">
+          {{ 'passed' if verification.passed else 'failed' }}
+        </span>
+      </td></tr>
+      <tr><th>Values checked</th><td>{{ verification.tokens_verified }} of {{ verification.tokens_emitted }} verified against the records</td></tr>
+      <tr><th>Method</th><td>{{ verification.method }}</td></tr>
+    </table>
+    {% if verification.failures %}
+      <ul class="reasons">
+        {% for failure in verification.failures %}
+          <li>{{ failure.token }}: {{ failure.reason }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% else %}
+    <p class="absent-note">No answer was verified.</p>
+  {% endif %}
+
+  <h2>How the answer was found</h2>
+  <table class="detail-table">
+    <tr><th>Figures and records used</th><td>{{ route | join(", ") if route else "none" }}</td></tr>
+    <tr><th>Answer written from</th><td>{{ answer_from or "not written" }}</td></tr>
+    <tr><th>Model calls</th><td>{{ attempts }}</td></tr>
+    <tr><th>Model</th><td>{{ model or "none" }}</td></tr>
+    <tr><th>Prompt version</th><td>{{ prompt_version }}</td></tr>
+  </table>
+  {% for sql in sqls %}
+    <pre class="b1-sql">{{ sql }}</pre>
+  {% endfor %}
+
+</section>
+
+</body>
+</html>

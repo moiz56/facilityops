@@ -1,0 +1,59 @@
+{#- B-2 executive summary: one macro per fact. Every argument is a slot
+    placeholder, a list of them, or wording chosen by code; no value is
+    written here. The model only orders the facts. -#}
+
+{% macro run_outcome(run, facility, start, end, run_status, final_status) -%}
+Run {{ run }} at {{ facility }} started {{ start }} and ended {{ end }}, with run status {{ run_status }} and final status {{ final_status }}.
+{%- endmacro %}
+
+{% macro coverage(completed, required) -%}
+Checkpoints completed: {{ completed }} of {{ required }}.
+{%- endmacro %}
+
+{% macro tally(label, n, ids) -%}
+{{ label }}: {{ n }}{% if ids %} ({{ ids | join(", ") }}){% endif %}.
+{%- endmacro %}
+
+{% macro count_mismatch(labels) -%}
+The robot's declared counts disagree with its own lists for {{ labels | join(", ") }}; the coverage statement gives both figures.
+{%- endmacro %}
+
+{% macro finding(feature, checkpoint, severity, status) -%}
+{{ feature }} at {{ checkpoint }} (severity {{ severity }}, status {{ status }})
+{%- endmacro %}
+
+{% macro findings(items) -%}
+Findings recorded: {{ items | join("; ") }}.
+{%- endmacro %}
+
+{% macro no_findings(run) -%}
+No findings were recorded on run {{ run }}.
+{%- endmacro %}
+
+{% macro review(items) -%}
+Findings the detector abstained on, which need human review: {{ items | join("; ") }}.
+{%- endmacro %}
+
+{% macro alerts(critical, warning) -%}
+Sensor alerts logged: {{ critical }} critical, {{ warning }} warning.
+{%- endmacro %}
+
+{% macro exclusion(block, scope, reason) -%}
+{{ block }} {% if scope %}at {{ scope }}{% else %}for the whole run{% endif %} ({{ reason }})
+{%- endmacro %}
+
+{% macro excluded(items) -%}
+Sensor values left out: {{ items | join("; ") }}.
+{%- endmacro %}
+
+{% macro stale_item(block, scope) -%}
+{{ block }} at {{ scope }}
+{%- endmacro %}
+
+{% macro stale(items) -%}
+Readings used although stale when taken: {{ items | join("; ") }}.
+{%- endmacro %}
+
+{% macro top_reading(field, value, checkpoint) -%}
+Highest checkpoint reading of {{ field }}: {{ value }} at {{ checkpoint }}.
+{%- endmacro %}

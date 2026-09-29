@@ -31,8 +31,8 @@ def extend_record(
         name: derive(entry, records, eligibility, config)
         for name, entry in config.derivations.items()
     }
-    excluded = excluded_entries(records[-1], eligibility, config) if records else []
-    stale = stale_entries(records[-1], eligibility, config) if records else []
+    excluded = {record.run_id: excluded_entries(record, eligibility, config) for record in records}
+    stale = [s for record in records for s in stale_entries(record, eligibility, config)]
 
     return ExtendedRecord(
         records=tuple(records),
@@ -170,12 +170,13 @@ def record_values(
 # D1
 
 def threshold_compare(
-    records: Sequence[Record], params: dict, eligibility: Eligibility, config: DerivationConfig,
+    record: Record, params: dict, eligibility: Eligibility, config: DerivationConfig,
 ) -> dict:
-    """Compare checkpoint values in the latest run against a threshold.
+    """Compare checkpoint values in one run against a threshold.
 
     scope is a checkpoint id, or "checkpoints" for all of them.
     delta = value - threshold. Equal to the threshold does not exceed it.
+    checkpoint_name is the name on the checkpoint's first entry in the run.
     """
     scope = param(params, "scope")
     field_path = param(params, "field_path")
@@ -189,9 +190,12 @@ def threshold_compare(
 
     values, exclusions = for_run(
         *lookup(eligibility, field_path, "threshold_compare"),
-        records[-1].run_id,
+        record.run_id,
         source_kind(params, "threshold_compare"),
     )
+    names = {}
+    for cp in record.checkpoints:
+        names.setdefault(cp.checkpoint_id, cp.checkpoint_name)
 
     def compare(cid: str) -> tuple[dict | None, str | None]:
         """(result, None) for a comparison, or (None, reason) if there isn't one."""
@@ -205,6 +209,7 @@ def threshold_compare(
         value = matches[0].value
         delta = value - threshold
         return {
+            "checkpoint_name": names[cid],
             "value": round_value(value, field_path, config),
             "exceeds": value > threshold if direction == "above" else value < threshold,
             "delta": round_value(delta, field_path, config),
@@ -228,17 +233,23 @@ def threshold_compare(
         return {**header, **result, "inputs_used": 1, "inputs_excluded": excluded}
 
     results = {}
-    for cid in dict.fromkeys(cp.checkpoint_id for cp in records[-1].checkpoints):
+    for cid in dict.fromkeys(cp.checkpoint_id for cp in record.checkpoints):
         result, reason = compare(cid)
-        results[cid] = {"status": "OK", **result} if result else {"status": "NOT_COMPUTABLE", "reason": reason}
+        results[cid] = (
+            {"status": "OK", **result} if result
+            else {"status": "NOT_COMPUTABLE", "checkpoint_name": names[cid], "reason": reason}
+        )
 
     used = sum(1 for r in results.values() if r["status"] == "OK")
     if used == 0:
         return not_computable("threshold_compare", "no checkpoint in the run has an eligible value")
 
+    exceeded = sum(1 for r in results.values() if r["status"] == "OK" and r["exceeds"])
     return {
         **header,
         "checkpoints": results,
+        "exceeds_count": exceeded,               # OK checkpoints that exceed the threshold
+        "not_exceeds_count": used - exceeded,    # OK checkpoints that do not
         "inputs_used": used,
         "inputs_excluded": sum(e.count for e in exclusions),
     }
@@ -247,15 +258,19 @@ def threshold_compare(
 # D2
 
 def condition_count(
-    records: Sequence[Record], params: dict, eligibility: Eligibility, config: DerivationConfig,
+    record: Record, params: dict, eligibility: Eligibility, config: DerivationConfig,
 ) -> dict:
-    """Count items in the latest run where a named condition holds.
+    """Count items in one run where a named condition holds.
 
-    Reads eligibility for "<scope>.<field>", so population and inputs_excluded
-    come straight from it.
+    Reads eligibility for "<scope>.<field>", so population, inputs_excluded
+    and excluded_items come straight from it. excluded_items has one entry per
+    item and reason eligibility left out, in record order: item_id is the
+    checkpoint_id (None for findings and sensor alerts, which eligibility does
+    not name), reason is eligibility's own, and count how many items it covers
+    (a checkpoint visited twice can be 2). The counts sum to inputs_excluded.
     """
-    population, matching_ids, excluded = match_condition(
-        records, params, eligibility, config, "condition_count",
+    population, matching_ids, exclusions = match_condition(
+        record, params, eligibility, config, "condition_count",
     )
 
     return {
@@ -266,21 +281,24 @@ def condition_count(
         "count": len(matching_ids),
         "matching_ids": matching_ids,
         "population": population,
-        "inputs_excluded": excluded,
+        "inputs_excluded": sum(e.count for e in exclusions),
+        "excluded_items": [
+            {"item_id": e.scope, "reason": e.reason, "count": e.count} for e in exclusions
+        ],
     }
 
 
 # D3
 
 def proportion(
-    records: Sequence[Record], params: dict, eligibility: Eligibility, config: DerivationConfig,
+    record: Record, params: dict, eligibility: Eligibility, config: DerivationConfig,
 ) -> dict:
-    """Share of items in the latest run where a named condition holds.
+    """Share of items in one run where a named condition holds.
 
     Numerator is the matching items, denominator is every eligible item.
     """
-    denominator, numerator_ids, excluded = match_condition(
-        records, params, eligibility, config, "proportion",
+    denominator, numerator_ids, exclusions = match_condition(
+        record, params, eligibility, config, "proportion",
     )
     if denominator == 0:
         return not_computable("proportion", "denominator is zero")
@@ -297,20 +315,20 @@ def proportion(
         "percentage": round_value(percentage, "percentage", config),
         "percentage_formatted": format_value(percentage, "percentage", config),
         "numerator_ids": numerator_ids,
-        "inputs_excluded": excluded,
+        "inputs_excluded": sum(e.count for e in exclusions),
     }
 
 
 # D4
 
 def group_mean(
-    records: Sequence[Record], params: dict, eligibility: Eligibility, config: DerivationConfig,
+    record: Record, params: dict, eligibility: Eligibility, config: DerivationConfig,
 ) -> dict:
-    """Mean of a field per group, over the latest run.
+    """Mean of a field per group, over one run (settings: derivations.yaml).
 
     A group whose inputs were all excluded is NOT_COMPUTABLE with no mean.
     """
-    groups, exclusions = group_inputs(records, params, eligibility, "group_mean")
+    groups, exclusions = group_inputs(record, params, eligibility, "group_mean")
     field_path = params["field_path"]
 
     results = {}
@@ -329,19 +347,20 @@ def group_mean(
             "inputs_stale": sum(1 for v in g["values"] if v.stale),
         }
 
-    return grouped_result("group_mean", params, results, records[-1], exclusions)
+    add_zone_checkpoints(record, params, results)
+    return grouped_result("group_mean", params, results, record, exclusions)
 
 
 # D5
 
 def group_max(
-    records: Sequence[Record], params: dict, eligibility: Eligibility, config: DerivationConfig,
+    record: Record, params: dict, eligibility: Eligibility, config: DerivationConfig,
 ) -> dict:
-    """Maximum of a field per group, over the latest run.
+    """Maximum of a field per group, over one run (settings: derivations.yaml).
 
     On a tie, source_id is the earliest by timestamp and tied_with lists the rest.
     """
-    groups, exclusions = group_inputs(records, params, eligibility, "group_max")
+    groups, exclusions = group_inputs(record, params, eligibility, "group_max")
     field_path = params["field_path"]
 
     results = {}
@@ -361,17 +380,19 @@ def group_max(
             **tied_with,
             "n": len(g["values"]),
             "inputs_excluded": g["excluded"],
+            "inputs_stale": sum(1 for v in g["values"] if v.stale),
         }
 
-    return grouped_result("group_max", params, results, records[-1], exclusions)
+    add_zone_checkpoints(record, params, results)
+    return grouped_result("group_max", params, results, record, exclusions)
 
 
 # D6
 
 def rank_top_n(
-    records: Sequence[Record], params: dict, eligibility: Eligibility, config: DerivationConfig,
+    record: Record, params: dict, eligibility: Eligibility, config: DerivationConfig,
 ) -> dict:
-    """The n highest values in the latest run, highest first.
+    """The n highest values in one run, highest first.
 
     Equal values are ordered earliest timestamp first, then route order.
     A value tied with rank n is included too, so n_returned can be more than
@@ -384,9 +405,9 @@ def rank_top_n(
 
     all_values, all_exclusions = lookup(eligibility, field_path, "rank_top_n")
     kind = source_kind(params, "rank_top_n")
-    values, exclusions = for_run(all_values, all_exclusions, records[-1].run_id, kind)
+    values, exclusions = for_run(all_values, all_exclusions, record.run_id, kind)
     if not values:
-        return not_computable("rank_top_n", no_inputs_reason(records[-1], all_exclusions))
+        return not_computable("rank_top_n", no_inputs_reason(record, all_exclusions))
 
     ordered = sorted(sorted(values, key=by_time), key=lambda v: v.value, reverse=True)
     cut = min(n, len(ordered))
@@ -455,27 +476,53 @@ def run_set_difference(
 def run_date_range(
     records: Sequence[Record], params: dict, eligibility: Eligibility, config: DerivationConfig,
 ) -> dict:
-    """Earliest and latest run start times, and the days between them.
+    """When the runs took place: the earliest and latest start, the days between,
+    and each day a run started on, with its runs.
 
-    span_days compares the two calendar dates as recorded, each in its own
-    offset, with no conversion to UTC. One run gives span_days 0.
+    Days are the calendar dates as recorded, each in its own offset, with no
+    conversion to UTC. span_days counts from the earliest date to the latest,
+    so one run, or runs all on one day, give 0. days_without_run is the days in
+    that span, both ends included, on which no run started. A run with no start
+    time is in no day and counted only in runs_without_start.
     """
     dated = [r for r in records if r.start_time is not None]
     if not dated:
         return not_computable("run_date_range", "no run has a start time")
 
-    earliest = min(r.start_time for r in dated)
-    latest = max(r.start_time for r in dated)
+    first = min(dated, key=lambda r: r.start_time)
+    last = max(dated, key=lambda r: r.start_time)
+    span_days = (last.start_time.date() - first.start_time.date()).days
+
+    # Each day's runs in the order they started.
+    by_day: dict = {}
+    for r in sorted(dated, key=lambda r: r.start_time):
+        by_day.setdefault(r.start_time.date(), []).append(r)
+    days = [
+        {
+            "date": day.isoformat(),
+            "date_formatted": format_date(runs[0].start_time, config),
+            "weekday": day.strftime("%A"),
+            "run_count": len(runs),
+            "run_ids": [r.run_id for r in runs],
+        }
+        for day, runs in sorted(by_day.items())
+    ]
 
     return {
         "derivation": "run_date_range",
         "status": "OK",
         "run_count": len(dated),
-        "earliest": format_timestamp(earliest, config),
-        "latest": format_timestamp(latest, config),
-        "earliest_formatted": format_date(earliest, config),
-        "latest_formatted": format_date(latest, config),
-        "span_days": (latest.date() - earliest.date()).days,
+        "runs_without_start": len(records) - len(dated),
+        "earliest": format_timestamp(first.start_time, config),
+        "latest": format_timestamp(last.start_time, config),
+        "earliest_formatted": format_date(first.start_time, config),
+        "latest_formatted": format_date(last.start_time, config),
+        "earliest_run_id": first.run_id,
+        "latest_run_id": last.run_id,
+        "span_days": span_days,
+        "day_count": len(days),
+        "days_without_run": span_days + 1 - len(days),
+        "days": days,
     }
 
 
@@ -492,13 +539,26 @@ DERIVATIONS = {
 }
 
 
+# D1-D6 work on one run and are run once for every run. D7 and D8 compare runs.
+PER_RUN = {"threshold_compare", "condition_count", "proportion", "group_mean", "group_max", "rank_top_n"}
+
+
 def derive(
     entry: dict, records: Sequence[Record], eligibility: Eligibility, config: DerivationConfig,
-) -> dict:
-    """Run one derivations.yaml entry. Any type outside the eight is an error."""
+) -> dict | list[dict]:
+    """Run one derivations.yaml entry. Any type outside the eight is an error.
+
+    D1-D6 give a list, one output per run, oldest first, each with its run_id.
+    """
     kind = param(entry, "type")
     if kind not in DERIVATIONS:
         raise UnknownDerivationError(f"unknown derivation type '{kind}'")
     if not records:
         return not_computable(kind, "no runs supplied")
+    if kind in PER_RUN:
+        outputs = []
+        for record in records:
+            output = DERIVATIONS[kind](record, entry, eligibility, config)
+            outputs.append({"derivation": kind, "run_id": record.run_id, **output})
+        return outputs
     return DERIVATIONS[kind](records, entry, eligibility, config)

@@ -1,0 +1,24 @@
+# B-3 action mapping (section 8.4).
+#
+# A finding's feature maps to a category. B-3 carries the finding's own
+# recommended_action verbatim; it never writes one. A feature not listed under
+# `features` is unmapped: B-3 says so and invents nothing. The agent never
+# decides a mapping - add one here. Features that sound alike are still
+# different features (airflow_obstruction is not blocked_airflow_path).
+
+features:                          # finding feature -> category
+  general_condition: review_evidence
+  inspection_incomplete: recapture
+  blocked_airflow_path: airflow
+  sensor_threshold_warning: sensor_review
+
+categories:                        # category -> rank within a severity, 1 first (TUNABLE)
+  airflow: 1
+  review_evidence: 2
+  sensor_review: 3
+  recapture: 4
+
+severity_rank:                     # section 8.4: fail = 1, warning = 2, info = 3
+  fail: 1
+  warning: 2
+  info: 3

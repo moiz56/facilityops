@@ -15,14 +15,7 @@ from common.schema import Record
 
 @dataclass(frozen=True)
 class DerivationConfig:
-    """Every setting the derivation layer needs, read from config once.
-
-    Built by:  utils.derivation_config, called from main.main.
-    Passed to: derivation.extend_record, compute_eligibility, eligible_values,
-               derive and every derivation (D1-D8), and the helpers that read
-               settings: utils.checkpoint_problem, item_id, round_value,
-               format_value, format_timestamp, format_date, match_condition,
-               entry_inputs, excluded_entries, stale_entries.
+    """Every setting the derivation layer needs, read from config once (utils.derivation_config).
 
     From report.yaml:
       subsystem_flags:      device flag -> sensor block it governs
@@ -63,14 +56,7 @@ class DerivationConfig:
 
 @dataclass(frozen=True)
 class EligibleValue:
-    """One value that passed the exclusion rule, so a derivation may use it.
-
-    Created by: derivation.eligible_values (sensor fields) and
-                derivation.record_values (record fields).
-    Read by:    every derivation through utils.lookup and utils.for_run,
-                utils.group_inputs, utils.by_time, utils.match_condition,
-                and the eligibility printout (utils.print_block, print_summary).
-    """
+    """One value that passed the exclusion rule, so a derivation may use it."""
 
     run_id: str
     kind: str               # checkpoint, sample, finding or sensor_alert
@@ -83,15 +69,8 @@ class EligibleValue:
 
 @dataclass(frozen=True)
 class Exclusion:
-    """Values the exclusion rule left out, and why.
-
-    One entry per run, kind, checkpoint, zone and reason, with a count.
-
-    Created by: derivation.eligible_values and derivation.record_values.
-    Read by:    utils.for_run, utils.group_inputs, utils.no_inputs_reason,
-                threshold_compare (per-checkpoint reasons), inputs_excluded in
-                every derivation, and the eligibility printout.
-    """
+    """Values the exclusion rule left out, and why: one entry per run, kind,
+    checkpoint, zone and reason, with a count."""
 
     run_id: str
     kind: str
@@ -102,10 +81,7 @@ class Exclusion:
     count: int
 
 
-# Field path -> (eligible values, exclusions).
-# Built by derivation.compute_eligibility (called from main.main, or from
-# extend_record when not passed in). Passed to derive and every derivation,
-# utils.excluded_entries, utils.stale_entries and utils.print_eligibility.
+# Field path -> (eligible values, exclusions), from derivation.compute_eligibility.
 Eligibility = dict[str, tuple[list[EligibleValue], list[Exclusion]]]
 
 
@@ -113,27 +89,22 @@ Eligibility = dict[str, tuple[list[EligibleValue], list[Exclusion]]]
 class DerivedValues:
     """Everything extend_record computed, held inside an ExtendedRecord.
 
-    Built by: derivation.extend_record.
-    Read by:  ExtendedRecord.to_dict.
-
-    values:   derivation instance name -> its output
-    excluded: {scope, block, reason, affected_derivations} per exclusion
-    stale:    {scope, block, affected_derivations} per stale input used
+    values:   derivation instance name -> its output. D1-D6 give a list, one
+              output per run, oldest first, each with run_id; D7 and D8 one dict.
+    excluded: run_id -> its {scope, block, reason, affected_derivations} per
+              exclusion. Every run has a key, oldest first; [] when nothing was left out
+    stale:    {run_id, scope, block, affected_derivations} per stale input used,
+              for every run, oldest first
     """
 
-    values: dict[str, dict]
-    excluded: list[dict]
+    values: dict[str, dict | list[dict]]
+    excluded: dict[str, list[dict]]
     stale: list[dict]
 
 
 @dataclass(frozen=True)
 class ExtendedRecord:
-    """The records, untouched, with the values derived from them (section 5).
-
-    Built by: derivation.extend_record, called from main.main.
-    Read by:  main.main (printed with to_dict), and later verify_numeric and
-              fill_slots (sections 6 and 10.2), not written yet.
-    """
+    """The records, untouched, with the values derived from them (section 5)."""
 
     records: tuple[Record, ...]
     derived: DerivedValues
@@ -158,10 +129,7 @@ class ExtendedRecord:
 
 @dataclass(frozen=True)
 class VerificationConfig:
-    """Every setting verify_numeric needs, read from config once.
-
-    Built by:  utils.verification_config, called from the entry point.
-    Passed to: verification.verify_numeric, as its third argument.
+    """Every setting verify_numeric needs, read from config once (utils.verification_config).
 
     From agents.yaml verification:
       numeric_tolerance, reject_unclassifiable, record_tolerance_anomalies,
@@ -201,9 +169,6 @@ class TokenClass(StrEnum):
 class VerificationResult:
     """What verify_numeric found in a piece of text.
 
-    Built by: verification.verify_numeric.
-    Read by:  the agents and the envelope, not written yet.
-
     by_class:    class name -> number of tokens of that class, all seven keys
     failures:    {token, class, position, reason} per token that did not verify
     anomalies:   {token, class, position, source_field, source_value} per token
@@ -235,3 +200,140 @@ class VerificationResult:
             "failures": self.failures,
             "anomalies": self.anomalies,
         }
+
+
+@dataclass(frozen=True)
+class Template:
+    """Template text with {{ slot_id }} placeholders, and where each slot's value comes from.
+
+    slots: slot_id -> source path, e.g.
+           "derived.values.group_mean_vibration_rms_g[2].groups.checkpoint_1.mean"
+    """
+
+    name: str
+    text: str
+    slots: dict[str, str]
+
+
+@dataclass(frozen=True)
+class FilledSlot:
+    """One value placed in the text (section 7.2). Citations are built from these."""
+
+    slot_id: str
+    source_field: str
+    raw_value: object
+    formatted: str
+    span: tuple[int, int]      # character offsets in the filled text
+
+
+@dataclass(frozen=True)
+class FilledTemplate:
+    """A template with every slot filled (slots.fill_slots); the slots become citations."""
+
+    name: str
+    text: str
+    slots: tuple[FilledSlot, ...]
+
+
+@dataclass(frozen=True)
+class ProviderConfig:
+    """agents.yaml provider settings. The API key is not one: make_provider reads it from the environment."""
+
+    name: str
+    model: str
+    timeout_seconds: float
+    max_retries: int
+    retry_backoff_seconds: float
+
+
+@dataclass(frozen=True)
+class B1Config:
+    """Every setting B-1 needs, read from agents.yaml once (utils.b1_config).
+
+    From agents.b1_analytical: enabled, prompt_version, max_attempts,
+      max_question_chars
+    From provider: temperature
+    From database: max_rows, query_timeout_seconds (its timeout_seconds)
+    """
+
+    enabled: bool
+    prompt_version: str
+    max_attempts: int
+    max_question_chars: int
+    temperature: float
+    max_rows: int
+    query_timeout_seconds: float
+
+
+@dataclass(frozen=True)
+class B2Config:
+    """Every setting B-2 needs, read from agents.yaml once (utils.b2_config).
+
+    From agents.b2_narrative: enabled, prose, prompt_version, max_attempts
+    From provider: temperature
+    """
+
+    enabled: bool
+    prose: bool
+    prompt_version: str
+    max_attempts: int
+    temperature: float
+
+
+@dataclass(frozen=True)
+class B3Config:
+    """Every setting B-3 needs, read from agents.yaml and action_mapping.yaml once (utils.b3_config).
+
+    From agents.b3_action: enabled, prose, prompt_version, max_attempts
+    From provider: temperature
+    From action_mapping.yaml: features (feature -> category), category_rank,
+      severity_rank
+    """
+
+    enabled: bool
+    prose: bool
+    prompt_version: str
+    max_attempts: int
+    temperature: float
+    features: dict[str, str]
+    category_rank: dict[str, int]
+    severity_rank: dict[str, int]
+
+
+@dataclass(frozen=True)
+class B1Result:
+    """What B-1 produced for one question, before the envelope wraps it.
+
+    status:       OK, DEGRADED_TEMPLATE_ONLY (the prose writer failed, so the
+                  answer is the facts code wrote, with no lead-in), REFUSED_UNVERIFIABLE or
+                  PROVIDER_UNAVAILABLE (section 9.3)
+    output:       {answer, citations, records_consulted} (section 8.1), or None
+                  when nothing may be shown
+    verification: of the answer that was shown, or None
+    sql:          the query that produced it, or None
+    attempts:     model calls made: router, SQL writer and prose writer together
+    reason:       why nothing was shown, why B-1 abstained, or why the prose failed
+    template:     the slot template the answer's facts were filled from, or None.
+                  Printed by main; not part of the envelope.
+    trace:        what each step was given and gave back, for tracing an
+                  answer to its source. Printed by main; not part of the envelope:
+                    question
+                    router:      calls [{attempt, reply, rejected}], route (the
+                                 checked Route)
+                    sql_writer:  one per route: route, instances, calls
+                                 [{attempt, reply, rejected, summary_sql}], sql,
+                                 values (slot -> cell), slots (slot -> path)
+                    prose:       calls [{attempt, reply, rejected}], lead (the
+                                 lead-in that went above the facts, or None)
+                    answer_from: prose, rows (the prose failed), abstain, or
+                                 None when nothing was shown
+    """
+
+    status: str
+    output: dict | None
+    verification: VerificationResult | None
+    sql: str | None
+    attempts: int
+    reason: str | None = None
+    template: Template | None = None
+    trace: dict | None = None

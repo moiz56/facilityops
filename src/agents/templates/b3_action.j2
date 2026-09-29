@@ -1,0 +1,23 @@
+{#- B-3 action plan as readable text. Arguments are slot placeholders, lists
+    of them, or wording chosen by code (a category's name). The action itself
+    is always the finding's own recommended_action, carried verbatim. -#}
+
+{% macro heading() -%}
+Actions, most urgent at the top:
+{%- endmacro %}
+
+{% macro action(category, severity, text, checkpoints, findings) -%}
+{{ category }}, severity {{ severity }}: {{ text }} Checkpoints: {{ checkpoints | join(", ") }}. Findings: {{ findings | join(", ") }}.
+{%- endmacro %}
+
+{% macro unmapped(feature, checkpoints) -%}
+No action is configured for finding type {{ feature }}. Findings of this type were recorded at {{ checkpoints | join(", ") }} and require manual review.
+{%- endmacro %}
+
+{% macro no_recorded_action(feature, checkpoints) -%}
+No recommended action is recorded for finding type {{ feature }} at {{ checkpoints | join(", ") }}; manual review is required.
+{%- endmacro %}
+
+{% macro no_findings(run) -%}
+No findings were recorded on run {{ run }}; the action plan is empty.
+{%- endmacro %}

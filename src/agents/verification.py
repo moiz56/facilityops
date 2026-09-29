@@ -12,8 +12,10 @@ import logging
 import re
 from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import datetime
+from typing import Sequence
 
-from agents.schema import ExtendedRecord, TokenClass, VerificationConfig, VerificationResult
+from agents.schema import ExtendedRecord, FilledSlot, TokenClass, VerificationConfig, VerificationResult
+from agents.slots import resolve
 
 log = logging.getLogger(__name__)
 
@@ -77,14 +79,15 @@ TOKEN_PATTERN = re.compile(
 def extract_tokens(text: str, word_numbers: bool) -> list[tuple[str, int, int]]:
     """Every numeric token in the text, as (token, start, end), in order.
 
-    A word is a token only if it has a digit in it (checkpoint_1, 1st). Number
-    and ordinal words (seven, second) are tokens when word_numbers is on.
+    A word is a token only if it has a digit or an underscore in it
+    (checkpoint_1, 1st, home_docking_station). Number and ordinal words
+    (seven, second) are tokens when word_numbers is on.
     """
     tokens = []
     for match in TOKEN_PATTERN.finditer(text):
         kind = match.lastgroup
         token = match.group()
-        if kind == "word" and not any(c.isdigit() for c in token):
+        if kind == "word" and "_" not in token and not any(c.isdigit() for c in token):
             continue
         if kind in ("word_number", "ordinal_word") and not word_numbers:
             continue
@@ -111,7 +114,9 @@ def classify_token(token: str, context: str) -> TokenClass:
         return TokenClass.COUNT
     if re.fullmatch(NUMBER, token):
         return TokenClass.MEASUREMENT
-    if re.fullmatch(WORD, token) and re.search(r"[a-z_]", lower) and re.search(r"\d", token):
+    # Only identifiers have an underscore: home_docking_station, checkpoint_1.
+    # Letters mixed with digits are identifiers too: cap0142.
+    if re.fullmatch(WORD, token) and ("_" in token or (re.search(r"[a-z]", lower) and re.search(r"\d", token))):
         return TokenClass.IDENTIFIER
     return TokenClass.UNVERIFIABLE
 
@@ -122,7 +127,7 @@ def classify_token(token: str, context: str) -> TokenClass:
 COUNT_KEYS = {
     "count", "n", "population", "n_returned", "n_requested", "numerator",
     "denominator", "run_count", "span_days", "inputs_used", "inputs_excluded",
-    "inputs_stale",
+    "inputs_stale", "runs_without_start", "day_count", "days_without_run",
 }
 
 
@@ -132,7 +137,7 @@ class Known:
 
     Derived entries carry (path, derivation instance name) so a match can be
     cited and listed in derived_values_used. Paths look like 7.2's
-    source_field: derived.values.group_max.groups.checkpoint_1.max, or
+    source_field: derived.values.group_max[2].groups.checkpoint_1.max, or
     records[0].checkpoints[2].sensor.environment.temperature_c.
     """
 
@@ -195,6 +200,8 @@ def gather(extended: ExtendedRecord, config: VerificationConfig) -> Known:
     for i, record in enumerate(extended.records):
         for path, value in walk(record, f"records[{i}]"):
             name = last_key(path)
+            # Field names are referents too: missed_reason, temperature_c.
+            known.record_strings.update(re.split(r"[.\[\]]", path))
             if isinstance(value, (list, tuple)):
                 known.largest_list = max(known.largest_list, len(value))
             elif is_number(value):
@@ -208,8 +215,11 @@ def gather(extended: ExtendedRecord, config: VerificationConfig) -> Known:
                 known.record_strings |= renderings(value, config)
             elif isinstance(value, str):
                 known.record_strings.add(value)
-                # An evidence path is also known by its file name: cap_0142.
-                known.record_strings.add(value.rsplit("/", 1)[-1].rsplit(".", 1)[0])
+                # An evidence path is also known by its file name, with and
+                # without the extension: cap_0142.jpg, cap_0142.
+                file_name = value.rsplit("/", 1)[-1]
+                known.record_strings.add(file_name)
+                known.record_strings.add(file_name.rsplit(".", 1)[0])
 
     for instance, output in extended.derived.values.items():
         for path, value in walk(output, f"derived.values.{instance}"):
@@ -224,7 +234,10 @@ def gather(extended: ExtendedRecord, config: VerificationConfig) -> Known:
                 if isinstance(value, int) and (name in COUNT_KEYS or name.startswith("count_")):
                     known.derived_counts.append((path, instance, value))
             elif isinstance(value, str):
-                known.derived_strings.setdefault(value, (path, instance))
+                # A field path is known whole and by its parts:
+                # environment.temperature_c, environment, temperature_c.
+                for text in [value, *value.split(".")]:
+                    known.derived_strings.setdefault(text, (path, instance))
                 if name.endswith("_formatted"):
                     known.derived_formatted.setdefault(value, (path, instance))
 
@@ -327,15 +340,24 @@ def check_measurement(
     return None, instance, {"source_field": path, "source_value": number}
 
 
-def verify_numeric(text: str, extended: ExtendedRecord, config: VerificationConfig) -> VerificationResult:
+def verify_numeric(
+    text: str, extended: ExtendedRecord, config: VerificationConfig, slots: Sequence[FilledSlot] = (),
+) -> VerificationResult:
     """Extract, classify and check every numeric token in the text (section 6).
 
     passed is true only when every token verified, so tokens_emitted equals
     tokens_verified whenever it is. Text with no tokens passes. method and
     regeneration_attempts are the caller's to set: the verifier does not know
     how the text was made or how many tries it took.
+
+    slots, if given, are the ones fill_slots placed in text. A token inside a
+    slot whose recorded value is text (a checkpoint name like "Rack A5 (back)")
+    is checked against that slot's source field: the slot's span must hold
+    exactly what the field holds. Beyond the brief, which checks each token on
+    its own; see DECISIONS.md.
     """
     known = gather(extended, config)
+    in_text = [slot for slot in slots if recorded_text(slot, text, extended)]
     tokens = extract_tokens(text, config.word_numbers)
     by_class = {c.value: 0 for c in TokenClass}
     derived_values_used: list[str] = []
@@ -343,10 +365,13 @@ def verify_numeric(text: str, extended: ExtendedRecord, config: VerificationConf
     anomalies: list[dict] = []
     verified = 0
 
-    for token, start, _ in tokens:
+    for token, start, end in tokens:
         token_class = classify_token(token, text[:start])
         by_class[token_class.value] += 1
         entry = {"token": token, "class": token_class.value, "position": start}
+        if any(slot.span[0] <= start and end <= slot.span[1] for slot in in_text):
+            verified += 1   # part of a recorded text value, confirmed whole against its field
+            continue
         reason, instance, near = check_token(token, token_class, known, config)
 
         if reason and token_class == TokenClass.UNVERIFIABLE and not config.reject_unclassifiable:
@@ -375,3 +400,11 @@ def verify_numeric(text: str, extended: ExtendedRecord, config: VerificationConf
         failures=failures,
         anomalies=anomalies,
     )
+
+
+def recorded_text(slot: FilledSlot, text: str, extended: ExtendedRecord) -> bool:
+    """Whether a filled slot is a text value copied whole from its source field:
+    the field holds a string, and the slot's span in text is exactly that string."""
+    value, _, _ = resolve(slot.source_field, extended)
+    start, end = slot.span
+    return isinstance(value, str) and text[start:end] == value

@@ -1,0 +1,14 @@
+{#- B-2 item note: one sentence per checkpoint. Arguments are slot
+    placeholders or lists of them. -#}
+
+{% macro missed(checkpoint, status, reason) -%}
+{{ checkpoint }} was not reached (status {{ status }}); reason recorded: {{ reason }}.
+{%- endmacro %}
+
+{% macro finding(feature, severity, status) -%}
+{{ feature }} (severity {{ severity }}, status {{ status }})
+{%- endmacro %}
+
+{% macro visited(checkpoint, status, result, observed, findings) -%}
+{{ checkpoint }} has status {{ status }} and result {{ result }}, observed {{ observed }}; {% if findings %}findings recorded: {{ findings | join("; ") }}{% else %}no findings recorded for this checkpoint{% endif %}.
+{%- endmacro %}

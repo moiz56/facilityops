@@ -3,8 +3,42 @@
 # Nothing here is read at import time. The entry point opens this file once
 # and passes what it holds down as arguments.
 
+provider:
+  # name: gemini                     # gemini or claude; the key is GEMINI_API_KEY or ANTHROPIC_API_KEY in .env
+  # model: gemini-2.5-flash
+  # For Claude, use these two lines instead. The model must accept temperature:
+  # claude-sonnet-4-6 and claude-haiku-4-5 do; Opus 5, Sonnet 5 and Opus 4.7+ return HTTP 400.
+  name: claude
+  model: claude-sonnet-4-6
+  temperature: 0.0                
+  timeout_seconds: 60
+  max_retries: 3                   # retries after a timeout, 429 or 5xx; other errors fail at once
+  retry_backoff_seconds: 2         # wait before retry n is n times this
+
+agents:
+  b1_analytical:
+    enabled: true
+    prose: true
+    prompt_version: b1_answer_v2
+    max_attempts: 2               # model calls per question, first try included
+    max_question_chars: 500        # a longer question is refused, never cut short
+  b2_narrative:
+    enabled: true
+    prose: true                    # false: the executive summary keeps code's fact order, no model call
+    prompt_version: narrative_v1
+    max_attempts: 2                # model calls per executive summary, first try included
+  b3_action:
+    enabled: true
+    prose: false                   # section 8.4: no model call by default; true adds one opening sentence
+    prompt_version: action_v1
+    max_attempts: 2                # model calls for that sentence, first try included
+
 verification:
   numeric_tolerance: 0.05          # TUNABLE - absolute
   reject_unclassifiable: true
   record_tolerance_anomalies: true
   word_numbers: true
+
+database:                          # the SQL B-1 runs against the in-memory database
+  max_rows: 500                    # a query returning more fails; it is never cut short
+  timeout_seconds: 2

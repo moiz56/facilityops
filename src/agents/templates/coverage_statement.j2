@@ -1,0 +1,35 @@
+{#- B-2 coverage statement: declared counts beside computed ones, then the
+    missed checkpoints and those with no evidence. Arguments are slot
+    placeholders or wording chosen by code. -#}
+
+{% macro row_agree(label, declared, computed) -%}
+{{ label }}: {{ computed }}, matching the declared {{ declared }}.
+{%- endmacro %}
+
+{% macro row_disagree(label, declared, computed, source) -%}
+{{ label }}: the robot declared {{ declared }}, but {{ source }} holds {{ computed }}; these figures disagree.
+{%- endmacro %}
+
+{% macro row_uncomputed(label, declared) -%}
+{{ label }}: declared {{ declared }}; no computed count is configured.
+{%- endmacro %}
+
+{% macro missed_item(checkpoint, reason) -%}
+{{ checkpoint }}, reason: {{ reason }}
+{%- endmacro %}
+
+{% macro missed(items) -%}
+Missed: {{ items | join("; ") }}.
+{%- endmacro %}
+
+{% macro no_evidence_item(checkpoint, observed) -%}
+{{ checkpoint }}, observed {{ observed }}
+{%- endmacro %}
+
+{% macro no_evidence(items) -%}
+Completed with no evidence images: {{ items | join("; ") }}.
+{%- endmacro %}
+
+{% macro no_checkpoints(run) -%}
+Run {{ run }} recorded no checkpoints.
+{%- endmacro %}

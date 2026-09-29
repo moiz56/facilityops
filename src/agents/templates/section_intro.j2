@@ -1,0 +1,18 @@
+{#- B-2 section introduction: one or two sentences opening a zone's section.
+    Arguments are slot placeholders or lists of them. -#}
+
+{% macro intro(zone, checkpoints) -%}
+Zone {{ zone }} covers {{ checkpoints | join(", ") }}.
+{%- endmacro %}
+
+{% macro mean(field, value) -%}
+{{ field }} {{ value }}
+{%- endmacro %}
+
+{% macro not_computable(field) -%}
+{{ field }} not computable
+{%- endmacro %}
+
+{% macro means(items) -%}
+Telemetry means for the zone: {{ items | join("; ") }}.
+{%- endmacro %}

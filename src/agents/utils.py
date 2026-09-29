@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
 from collections import Counter
 from dataclasses import fields
 from datetime import datetime
+from pathlib import Path
 from typing import Sequence
 
 from common.paths import ConfigError, setting
 from common.schema import Accelerometer, Checkpoint, Environment, Particulate, Record
 from agents.schema import (
-    DerivationConfig, Eligibility, EligibleValue, Exclusion, VerificationConfig,
+    B1Config, B2Config, B3Config, DerivationConfig, Eligibility, EligibleValue, Exclusion, ProviderConfig,
+    VerificationConfig,
 )
 
 SENSOR_BLOCKS = {
@@ -123,12 +127,12 @@ def format_date(timestamp: datetime, config: DerivationConfig) -> str:
 
 
 def match_condition(
-    records: Sequence[Record], params: dict, eligibility: Eligibility,
+    record: Record, params: dict, eligibility: Eligibility,
     config: DerivationConfig, derivation: str,
-) -> tuple[int, list[str], int]:
-    """Apply a named condition to the latest run's eligible items.
+) -> tuple[int, list[str], list[Exclusion]]:
+    """Apply a named condition to one run's eligible items.
 
-    Returns (eligible count, matching ids, excluded count).
+    Returns (eligible count, matching ids, the run's exclusions for the field).
     """
     scope = param(params, "scope")
     name = param(params, "condition")
@@ -141,15 +145,15 @@ def match_condition(
     field_path = f"{scope}.{param(condition, 'field')}"
     equals = param(condition, "equals")
 
-    values, exclusions = for_run(*lookup(eligibility, field_path, derivation), records[-1].run_id)
+    values, exclusions = for_run(*lookup(eligibility, field_path, derivation), record.run_id)
     matching_ids = [v.source_id for v in values if v.value == equals]
-    return len(values), matching_ids, sum(e.count for e in exclusions)
+    return len(values), matching_ids, exclusions
 
 
 def group_inputs(
-    records: Sequence[Record], params: dict, eligibility: Eligibility, derivation: str,
+    record: Record, params: dict, eligibility: Eligibility, derivation: str,
 ) -> tuple[dict, list[Exclusion]]:
-    """The latest run's inputs for a grouped derivation, split into groups.
+    """One run's inputs for a grouped derivation, split into groups.
 
     Each group is {"values": [...], "excluded": count, "reasons": [...]}, in
     the order the values come. Also returns all of the field's exclusions, for
@@ -161,7 +165,7 @@ def group_inputs(
 
     all_values, all_exclusions = lookup(eligibility, param(params, "field_path"), derivation)
     kind = source_kind(params, derivation)
-    values, exclusions = for_run(all_values, all_exclusions, records[-1].run_id, kind)
+    values, exclusions = for_run(all_values, all_exclusions, record.run_id, kind)
 
     groups: dict = {}
     for v in values:
@@ -173,6 +177,25 @@ def group_inputs(
         if e.reason not in g["reasons"]:
             g["reasons"].append(e.reason)
     return groups, all_exclusions
+
+
+def add_zone_checkpoints(record: Record, params: dict, results: dict) -> None:
+    """Per zone, give each group the run's checkpoints in that zone.
+
+    checkpoints: [{checkpoint_id, checkpoint_name}], from the checkpoint
+    records' own zone, first entry per id, in route order; [] when no
+    checkpoint is in the zone. So a question about a checkpoint can find its
+    zone's figure. Nothing is added for other groupings.
+    """
+    if params["group_by"] != "zone":
+        return
+    in_zone: dict = {}
+    for cp in record.checkpoints:
+        in_zone.setdefault(cp.zone, {}).setdefault(cp.checkpoint_id, cp.checkpoint_name)
+    for key, result in results.items():
+        result["checkpoints"] = [
+            {"checkpoint_id": cid, "checkpoint_name": name} for cid, name in in_zone.get(key, {}).items()
+        ]
 
 
 def empty_group(group: dict) -> dict:
@@ -208,7 +231,7 @@ def no_inputs_reason(record: Record, exclusions: list[Exclusion]) -> str:
 
 
 def excluded_entries(record: Record, eligibility: Eligibility, config: DerivationConfig) -> list[dict]:
-    """The extended record's `excluded` list for one run (section 5.2).
+    """The extended record's `excluded` entries for one run (section 5.2).
 
     One entry per checkpoint, block and reason, naming the derivations it
     affected. A reason that covers every checkpoint in the run becomes a
@@ -246,7 +269,7 @@ def excluded_entries(record: Record, eligibility: Eligibility, config: Derivatio
 
 
 def stale_entries(record: Record, eligibility: Eligibility, config: DerivationConfig) -> list[dict]:
-    """The extended record's `stale` list for one run: stale inputs a derivation used."""
+    """The extended record's `stale` entries for one run: stale inputs a derivation used."""
     entries: dict[tuple, list[str]] = {}
 
     for name, entry in config.derivations.items():
@@ -263,7 +286,7 @@ def stale_entries(record: Record, eligibility: Eligibility, config: DerivationCo
                     names.append(name)
 
     return [
-        {"scope": scope, "block": block, "affected_derivations": names}
+        {"run_id": record.run_id, "scope": scope, "block": block, "affected_derivations": names}
         for (scope, block), names in entries.items()
     ]
 
@@ -303,6 +326,12 @@ def field_problem(value: object) -> str | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return "field is not a number"
     return None
+
+
+def fill_prompt(template: str, values: dict) -> str:
+    """Fill a prompt's {name} placeholders in one pass, so nothing inserted is
+    read for placeholders again. An unknown {name} is left as it is."""
+    return re.sub(r"\{(\w+)\}", lambda m: str(values.get(m.group(1), m.group(0))), template)
 
 
 def read_path(obj: object, field_path: str) -> object:
@@ -394,7 +423,6 @@ def derivation_config(report: dict, derivations: dict, config_hash: str) -> Deri
     )
 
 
-
 def verification_config(agents: dict, report: dict, derivations: dict) -> VerificationConfig:
     """agents.yaml verification settings, plus what verification needs from the other two files."""
     tolerance = setting(agents, "verification", "numeric_tolerance")
@@ -419,6 +447,115 @@ def verification_config(agents: dict, report: dict, derivations: dict) -> Verifi
         engine_version=str(setting(report, "provenance", "engine_version")),
         template_version=str(setting(report, "provenance", "template_version")),
         **flags,
+    )
+
+
+def number_setting(config: dict, section: str, key: str, whole: bool = False) -> float:
+    """A required setting that must be a positive number (a whole one if whole)."""
+    value = setting(config, section, key)
+    kinds = int if whole else (int, float)
+    if isinstance(value, bool) or not isinstance(value, kinds) or value <= 0:
+        kind = "a whole number" if whole else "a number"
+        raise ConfigError(f"setting '{section}.{key}' must be {kind} above 0")
+    return value
+
+
+def provider_config(agents: dict) -> ProviderConfig:
+    """agents.yaml provider settings."""
+    retries = setting(agents, "provider", "max_retries")
+    if isinstance(retries, bool) or not isinstance(retries, int) or retries < 0:
+        raise ConfigError("setting 'provider.max_retries' must be a whole number, 0 or more")
+    return ProviderConfig(
+        name=str(setting(agents, "provider", "name")),
+        model=str(setting(agents, "provider", "model")),
+        timeout_seconds=number_setting(agents, "provider", "timeout_seconds"),
+        max_retries=retries,
+        retry_backoff_seconds=number_setting(agents, "provider", "retry_backoff_seconds"),
+    )
+
+
+def b1_config(agents: dict) -> B1Config:
+    """agents.yaml settings B-1 reads: its own entry, the temperature and the query limits."""
+    entry = setting(agents, "agents", "b1_analytical")
+    if not isinstance(entry, dict):
+        raise ConfigError("setting 'agents.b1_analytical' must be a table")
+    b1 = {"b1": entry}
+
+    enabled = setting(b1, "b1", "enabled")
+    if not isinstance(enabled, bool):
+        raise ConfigError("setting 'agents.b1_analytical.enabled' must be true or false")
+    temperature = setting(agents, "provider", "temperature")
+    if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or temperature < 0:
+        raise ConfigError("setting 'provider.temperature' must be a number, 0 or more")
+
+    return B1Config(
+        enabled=enabled,
+        prompt_version=str(setting(b1, "b1", "prompt_version")),
+        max_attempts=number_setting(b1, "b1", "max_attempts", whole=True),
+        max_question_chars=number_setting(b1, "b1", "max_question_chars", whole=True),
+        temperature=float(temperature),
+        max_rows=number_setting(agents, "database", "max_rows", whole=True),
+        query_timeout_seconds=number_setting(agents, "database", "timeout_seconds"),
+    )
+
+
+def b2_config(agents: dict) -> B2Config:
+    """agents.yaml settings B-2 reads: its own entry and the temperature."""
+    entry = setting(agents, "agents", "b2_narrative")
+    if not isinstance(entry, dict):
+        raise ConfigError("setting 'agents.b2_narrative' must be a table")
+    b2 = {"b2": entry}
+
+    switches = {}
+    for key in ("enabled", "prose"):
+        switches[key] = setting(b2, "b2", key)
+        if not isinstance(switches[key], bool):
+            raise ConfigError(f"setting 'agents.b2_narrative.{key}' must be true or false")
+    temperature = setting(agents, "provider", "temperature")
+    if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or temperature < 0:
+        raise ConfigError("setting 'provider.temperature' must be a number, 0 or more")
+
+    return B2Config(
+        prompt_version=str(setting(b2, "b2", "prompt_version")),
+        max_attempts=number_setting(b2, "b2", "max_attempts", whole=True),
+        temperature=float(temperature),
+        **switches,
+    )
+
+
+def b3_config(agents: dict, mapping: dict) -> B3Config:
+    """agents.yaml settings B-3 reads, and the action mapping."""
+    entry = setting(agents, "agents", "b3_action")
+    if not isinstance(entry, dict):
+        raise ConfigError("setting 'agents.b3_action' must be a table")
+    b3 = {"b3": entry}
+
+    switches = {}
+    for key in ("enabled", "prose"):
+        switches[key] = setting(b3, "b3", key)
+        if not isinstance(switches[key], bool):
+            raise ConfigError(f"setting 'agents.b3_action.{key}' must be true or false")
+    temperature = setting(agents, "provider", "temperature")
+    if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or temperature < 0:
+        raise ConfigError("setting 'provider.temperature' must be a number, 0 or more")
+
+    tables = {}
+    for key in ("features", "categories", "severity_rank"):
+        tables[key] = mapping.get(key)
+        if not isinstance(tables[key], dict):
+            raise ConfigError(f"missing required setting '{key}' in the action mapping")
+    for feature, category in tables["features"].items():
+        if category not in tables["categories"]:
+            raise ConfigError(f"action mapping: feature '{feature}' maps to '{category}', which has no rank")
+
+    return B3Config(
+        prompt_version=str(setting(b3, "b3", "prompt_version")),
+        max_attempts=number_setting(b3, "b3", "max_attempts", whole=True),
+        temperature=float(temperature),
+        features=tables["features"],
+        category_rank=tables["categories"],
+        severity_rank=tables["severity_rank"],
+        **switches,
     )
 
 
@@ -519,3 +656,79 @@ def together(counts: Counter, names: list[str]) -> str:
     if len(set(per_field)) == 1:
         return str(per_field[0])
     return " ".join(f"{name}={n}" for name, n in zip(names, per_field))
+
+
+def print_b1_answer(result, extended) -> None:
+    """B-1's answer, each value's citation (its text, the run it is about,
+    where it is in the records), and the verification."""
+    if not result.output:
+        return
+    from agents.b1_analytical import run_of   # here, not at the top: b1_analytical imports utils
+
+    answer = result.output["answer"]
+    print(f"\nanswer:\n{answer}")
+    if result.output["citations"]:
+        print("\ncitations:")
+        for citation in result.output["citations"]:
+            start, end = citation["claim_span"]
+            run = run_of(citation["source_field"], extended) or "all runs"
+            print(f"  {answer[start:end]!r:<28} {run:<46} {citation['source_field']}")
+    if result.verification:
+        v = result.verification
+        print(f"\nverification: {'passed' if v.passed else 'FAILED'}, "
+              f"{v.tokens_verified} of {v.tokens_emitted} values verified")
+        for failure in v.failures:
+            print(f"  {failure}")
+
+
+def print_b1_trace(trace: dict) -> None:
+    """B-1's steps in order: what each model replied, whether code took it,
+    and what code did with it. See B1Result.trace."""
+
+    def print_calls(calls: list[dict]) -> None:
+        for call in calls:
+            verdict = f"REJECTED: {call['rejected']}" if call["rejected"] else "accepted"
+            print(f"   attempt {call['attempt']} ({verdict})")
+            print("     " + str(call["reply"]).strip().replace("\n", "\n     "))
+            if call.get("summary_sql"):
+                print("   no rows matched, so code ran the summary query:")
+                print("     " + call["summary_sql"].replace("\n", "\n     "))
+
+    print(f"\ntrace: {trace['question']!r}")
+    print("\n1. router")
+    print_calls(trace["router"]["calls"])
+    route = trace["router"]["route"]
+    if route:
+        if route["abstain"]:
+            print(f"   route: abstain ({route['reason']})")
+        else:
+            print(f"   route: runs {route['run_ids']}")
+            print(f"          zones {route.get('zones') or '(any)'}")
+            print(f"          checkpoints {route['checkpoints'] or '(any)'}")
+            print(f"          derivations {route['derivations']}")
+
+    for k, step in enumerate(trace["sql_writer"], start=2):
+        print(f"\n{k}. sql writer: {step['route']} ({', '.join(step['instances'])})")
+        print_calls(step["calls"])
+        if step["values"]:
+            print("   values the query returned, and where each is in the records:")
+            for slot_id, value in step["values"].items():
+                print(f"     {slot_id:<26} {str(value)!r:<30} {step['slots'].get(slot_id, '')}")
+
+    k = len(trace["sql_writer"]) + 2
+    print(f"\n{k}. prose writer")
+    print_calls(trace["prose"]["calls"])
+    if trace["prose"]["lead"]:
+        print("   lead-in:")
+        print("     " + trace["prose"]["lead"].replace("\n", "\n     "))
+    print(f"\nanswer from: {trace['answer_from']}")
+
+
+def load_env(path: Path) -> None:
+    """Put a .env file's KEY=VALUE lines into the environment. A variable already set wins; no file is fine."""
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        name, sep, value = line.partition("=")
+        if sep and name.strip() and not name.strip().startswith("#"):
+            os.environ.setdefault(name.strip(), value.strip().strip("\"'"))
