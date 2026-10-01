@@ -57,17 +57,33 @@ each checkpoint the robot records:
 - sensor readings:
 {fields}
 - evidence images, some thermal, some annotated
+- if it missed the checkpoint, why (its missed reason); what was observed
+  there, and any operator notes
+Each run also records:
+- findings: what was found, at which checkpoint, how severe, their status
+  (logged, needs review, abstained) and the recommended action recorded
+  with each
+- sensor alerts logged during the run, and the run's event log
+- the run's own details: facility, run status, final result, start and end
+  time, duration
 A reading from a faulty or offline sensor, or from a checkpoint the robot
 missed, is left out, and the reason it was left out is kept.
 
 THE THREE KINDS
-derivation: a figure worked out over the runs. These are held:
+derivation: a figure worked out over the runs, or a detail the runs recorded
+that lookup does not hold. These are held:
 {derivations}
   Choose derivation whenever the question asks for a figure worked out from
   several values: how many, what share, an average, the highest or lowest, a
   ranking, above or below a limit, a difference between runs, when runs were
   taken. Choose it even when none of the above looks like a fit: the next
   step checks that, and says so when none holds it.
+  Choose it too for the records lookup does not hold, even though they are
+  recorded values, not figures: findings and their recommended actions,
+  sensor alerts, the event log, the run's own details, why a checkpoint was
+  missed, and what was observed or noted there. "Which findings need
+  review", "what was missed and why", "what recommended action is recorded
+  at <checkpoint>" and "how did the latest run end" are derivation.
 
 lookup: values exactly as recorded, for particular runs, zones or
 checkpoints, with nothing combined or worked out:
@@ -85,14 +101,18 @@ checkpoints, with nothing combined or worked out:
   names, even when a derivation happens to carry that value too.
 
 abstain: neither can answer it:
-  - why something happened, what will happen, or what should be done
+  - why something happened, what will happen, or advice of your own on what
+    should be done (a recommended action the records hold is a recorded
+    detail: derivation)
   - a judgement: better, worse, safe, normal, acceptable
   - anything the records do not hold: costs, maintenance, people, other sites
 
 RULES
 - Decide from what the question asks for, not from its wording.
-- A figure worked out from several values is derivation; one recorded value
-  of a named item is lookup. "The temperature at <checkpoint>" is lookup;
+- A figure worked out from several values is derivation; one recorded
+  reading, status, zone or image of a named item is lookup; any other
+  recorded detail (findings, alerts, events, the run's details, missed
+  reasons, observations, notes) is derivation. "The temperature at <checkpoint>" is lookup;
   "the highest temperature in <zone>" and "did <checkpoint> go over the
   limit" are derivation.
 - A question that asks for a figure and a recorded value together is

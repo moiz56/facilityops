@@ -40,8 +40,9 @@ DESCRIPTIONS = {
     ),
     "checkpoints": (
         "each run's checkpoints: the zone each is in, its place in the route order, whether the robot "
-        "got there (status COMPLETED or MISSED) and its verdict (result_status PASS, FAIL or WARN), or "
-        "why the verdict is not held. For \"was <checkpoint> completed\", \"what was <checkpoint>'s "
+        "got there (status COMPLETED or MISSED) and its verdict (result_status PASS, FAIL or WARN; "
+        "empty when the checkpoint was missed, which status shows). For \"was <checkpoint> completed\", "
+        "\"what was <checkpoint>'s "
         "result\", \"which zone is <checkpoint> in\", \"which checkpoints are in <zone>\", \"what "
         "order does the route take\""
     ),
@@ -67,7 +68,9 @@ assert set(DESCRIPTIONS) == set(TABLES), "every lookup table needs a description
 #   {places}    how to name the runs, zones and checkpoints (the derivation router's PLACES)
 #   {question}  the user's question
 #   {feedback}  empty on the first call; why the previous reply was rejected after that
-PROMPT = """You are the first step in looking up what facility inspections recorded.
+PROMPT = """You are the second step in looking up what facility inspections recorded.
+An earlier step decided this question asks for values as they were recorded:
+a reading, a status or verdict, a zone, or an image.
 
 HOW THIS WORKS
 An inspection robot drives a route of checkpoints around a facility. Each time
@@ -99,8 +102,9 @@ Everything sits in one hierarchy, each level inside the one above:
   checkpoint has different values in different runs.
 - A zone can hold several checkpoints, or just one; then the two often share
   a name. A checkpoint is in exactly one zone.
-- A reading or image is always at a checkpoint. A question about a zone
-  covers the checkpoints in it; a question about a run covers every zone.
+- In these tables a reading or image is always at a checkpoint. A question
+  about a zone covers the checkpoints in it; a question about a run covers
+  every zone.
 - Each table below holds one level of this, or one branch of a checkpoint.
 - In the examples below, <checkpoint> and <zone> stand for any checkpoint or
   zone name. The real names are listed further down.

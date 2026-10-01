@@ -150,6 +150,31 @@ def match_condition(
     return len(values), matching_ids, exclusions
 
 
+def count_by_value(
+    record: Record, params: dict, eligibility: Eligibility, derivation: str,
+) -> tuple[int, list[dict], list[Exclusion]]:
+    """How many of one run's eligible items have each value of a field.
+
+    Returns (eligible count, [{value, count, expected}], the run's exclusions
+    for the field). The expected values come first, in config order, each
+    listed even at 0; any other value found follows, verbatim, in the order
+    first seen. The counts sum to the eligible count.
+    """
+    scope = param(params, "scope")
+    field = param(params, "by_value")
+    if scope not in RECORD_SCOPES:
+        raise ValueError(f"{derivation}: scope must be one of {', '.join(RECORD_SCOPES)}, got {scope!r}")
+    expected = params.get("expected") or []
+    if not isinstance(expected, list) or not all(isinstance(v, str) for v in expected):
+        raise ValueError(f"{derivation}: expected must be a list of values")
+
+    values, exclusions = for_run(*lookup(eligibility, f"{scope}.{field}", derivation), record.run_id)
+    found = Counter(v.value for v in values)
+    rows = [{"value": value, "count": found.get(value, 0), "expected": True} for value in expected]
+    rows += [{"value": value, "count": n, "expected": False} for value, n in found.items() if value not in expected]
+    return len(values), rows, exclusions
+
+
 def group_inputs(
     record: Record, params: dict, eligibility: Eligibility, derivation: str,
 ) -> tuple[dict, list[Exclusion]]:
@@ -361,6 +386,8 @@ def entry_inputs(entry: dict, config: DerivationConfig) -> tuple[str, str | None
     (checkpoints.result_status, None) for D2. None for D7 and D8, which read
     the records directly.
     """
+    if "by_value" in entry and "scope" in entry:
+        return f"{entry['scope']}.{entry['by_value']}", None
     if "condition" in entry:
         condition = config.conditions.get(entry["condition"]) or {}
         if "scope" in entry and "field" in condition:
@@ -474,57 +501,53 @@ def provider_config(agents: dict) -> ProviderConfig:
     )
 
 
-def b1_config(agents: dict) -> B1Config:
-    """agents.yaml settings B-1 reads: its own entry, the temperature and the query limits."""
-    entry = setting(agents, "agents", "b1_analytical")
-    if not isinstance(entry, dict):
-        raise ConfigError("setting 'agents.b1_analytical' must be a table")
-    b1 = {"b1": entry}
+def agent_settings(agents: dict, name: str, switches: tuple[str, ...]) -> tuple[dict, dict, float]:
+    """One agent's agents.yaml entry, checked: ({name: entry}, its true/false switches, the provider temperature).
 
-    enabled = setting(b1, "b1", "enabled")
-    if not isinstance(enabled, bool):
-        raise ConfigError("setting 'agents.b1_analytical.enabled' must be true or false")
+    The entry comes back wrapped, so setting() and number_setting() name a
+    missing key as agents.yaml spells it, e.g. 'b2_narrative.max_attempts'.
+    """
+    entry = setting(agents, "agents", name)
+    if not isinstance(entry, dict):
+        raise ConfigError(f"setting 'agents.{name}' must be a table")
+    wrapped = {name: entry}
+    values = {}
+    for key in switches:
+        values[key] = setting(wrapped, name, key)
+        if not isinstance(values[key], bool):
+            raise ConfigError(f"setting 'agents.{name}.{key}' must be true or false")
     temperature = setting(agents, "provider", "temperature")
     if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or temperature < 0:
         raise ConfigError("setting 'provider.temperature' must be a number, 0 or more")
+    return wrapped, values, float(temperature)
 
+
+def b1_config(agents: dict) -> B1Config:
+    """agents.yaml settings B-1 reads: its own entry, the temperature and the query limits."""
+    b1, switches, temperature = agent_settings(agents, "b1_analytical", ("enabled",))
     return B1Config(
-        enabled=enabled,
-        prompt_version=str(setting(b1, "b1", "prompt_version")),
-        max_attempts=number_setting(b1, "b1", "max_attempts", whole=True),
-        max_question_chars=number_setting(b1, "b1", "max_question_chars", whole=True),
-        temperature=float(temperature),
+        prompt_version=str(setting(b1, "b1_analytical", "prompt_version")),
+        max_attempts=number_setting(b1, "b1_analytical", "max_attempts", whole=True),
+        max_question_chars=number_setting(b1, "b1_analytical", "max_question_chars", whole=True),
+        temperature=temperature,
         max_rows=number_setting(agents, "database", "max_rows", whole=True),
         query_timeout_seconds=number_setting(agents, "database", "timeout_seconds"),
+        **switches,
     )
 
 
 def b2_config(agents: dict) -> B2Config:
     """agents.yaml settings B-2 reads: its own entry and the temperature."""
-    entry = setting(agents, "agents", "b2_narrative")
-    if not isinstance(entry, dict):
-        raise ConfigError("setting 'agents.b2_narrative' must be a table")
-    b2 = {"b2": entry}
-
-    switches = {}
-    for key in ("enabled", "prose"):
-        switches[key] = setting(b2, "b2", key)
-        if not isinstance(switches[key], bool):
-            raise ConfigError(f"setting 'agents.b2_narrative.{key}' must be true or false")
-    temperature = setting(agents, "provider", "temperature")
-    if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or temperature < 0:
-        raise ConfigError("setting 'provider.temperature' must be a number, 0 or more")
-
+    b2, switches, temperature = agent_settings(agents, "b2_narrative", ("enabled", "prose"))
     tables = {}
     for key in ("warning_fields", "metric_names"):
-        tables[key] = entry.get(key) or {}
+        tables[key] = b2["b2_narrative"].get(key) or {}
         if not isinstance(tables[key], dict) or not all(isinstance(v, str) for v in tables[key].values()):
             raise ConfigError(f"setting 'agents.b2_narrative.{key}' must be a table of text values")
-
     return B2Config(
-        prompt_version=str(setting(b2, "b2", "prompt_version")),
-        max_attempts=number_setting(b2, "b2", "max_attempts", whole=True),
-        temperature=float(temperature),
+        prompt_version=str(setting(b2, "b2_narrative", "prompt_version")),
+        max_attempts=number_setting(b2, "b2_narrative", "max_attempts", whole=True),
+        temperature=temperature,
         **switches,
         **tables,
     )
@@ -532,20 +555,7 @@ def b2_config(agents: dict) -> B2Config:
 
 def b3_config(agents: dict, mapping: dict) -> B3Config:
     """agents.yaml settings B-3 reads, and the action mapping."""
-    entry = setting(agents, "agents", "b3_action")
-    if not isinstance(entry, dict):
-        raise ConfigError("setting 'agents.b3_action' must be a table")
-    b3 = {"b3": entry}
-
-    switches = {}
-    for key in ("enabled", "prose"):
-        switches[key] = setting(b3, "b3", key)
-        if not isinstance(switches[key], bool):
-            raise ConfigError(f"setting 'agents.b3_action.{key}' must be true or false")
-    temperature = setting(agents, "provider", "temperature")
-    if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or temperature < 0:
-        raise ConfigError("setting 'provider.temperature' must be a number, 0 or more")
-
+    b3, switches, temperature = agent_settings(agents, "b3_action", ("enabled", "prose"))
     tables = {}
     for key in ("features", "categories", "severity_rank"):
         tables[key] = mapping.get(key)
@@ -554,11 +564,10 @@ def b3_config(agents: dict, mapping: dict) -> B3Config:
     for feature, category in tables["features"].items():
         if category not in tables["categories"]:
             raise ConfigError(f"action mapping: feature '{feature}' maps to '{category}', which has no rank")
-
     return B3Config(
-        prompt_version=str(setting(b3, "b3", "prompt_version")),
-        max_attempts=number_setting(b3, "b3", "max_attempts", whole=True),
-        temperature=float(temperature),
+        prompt_version=str(setting(b3, "b3_action", "prompt_version")),
+        max_attempts=number_setting(b3, "b3_action", "max_attempts", whole=True),
+        temperature=temperature,
         features=tables["features"],
         category_rank=tables["categories"],
         severity_rank=tables["severity_rank"],

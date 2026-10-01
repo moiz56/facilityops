@@ -103,7 +103,8 @@ RULES FOR THE QUERY
 - Path columns, so code can find each value in the records:
   r.path AS path_r for run_id; m.path AS path_m for item_id; d.path AS path_d
   for any column from d3_proportion. Select only the ones the shown columns need.
-- Every selected column needs its own plain name: alias clashes.
+- Every selected column needs its own plain name with no digits: alias
+  clashes, e.g. d.instance AS share_instance, m.instance AS item_instance.
 - Order by r.run_order, then m.position for item rows, or d.instance for
   share rows.
 

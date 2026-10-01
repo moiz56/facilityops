@@ -140,16 +140,8 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as error:
         return fail(str(error))
 
-    if args.summary:
-        return summarise(args.summary, paths, report, args.b2_derivations, agents)
-    if args.section_intros:
-        return introduce(args.section_intros, paths, report, args.b2_derivations, agents)
-    if args.item_notes:
-        return annotate(args.item_notes, paths, report, args.b2_derivations, agents)
-    if args.coverage:
-        return state_coverage(args.coverage, paths, report, args.b2_derivations, agents)
-    if args.plan:
-        return action_plan(args.plan, paths, report, args.b2_derivations, agents, args.mapping)
+    if args.summary or args.section_intros or args.item_notes or args.coverage or args.plan:
+        return per_run(args, paths, report, agents)
 
     try:
         data_dir = args.data_dir or PROJECT_ROOT / setting(paths, "agent", "data_dir")
@@ -288,88 +280,47 @@ def run_record(run: Path, paths: dict) -> Path | None:
     return next((path for path in found if path.is_file()), None)
 
 
-def b2_run(
-    run: Path, paths: dict, report: dict, b2_derivations: Path, agents: dict, call,
-    agent: str = "B-2", file: str = "extended_record",
-) -> tuple:
-    """Load one run, call an agent on it (B-2, or B-3), and write the run's extended record
-    to <b2_output>/<run_id>_<file>.json.
+def per_run(args: argparse.Namespace, paths: dict, report: dict, agents: dict) -> int:
+    """--summary, --section-intros, --item-notes, --coverage, --plan: one agent on one run.
 
-    Returns (result, None), or (None, exit status) when it failed.
+    The run is derived from itself alone, with b2_derivations.yaml. The run's
+    extended record is written to <agent.b2_output>/<run_id>_<file>.json; the
+    agent's envelope (or one per zone, or per checkpoint) is printed, then each
+    text. --coverage resolves images against agent.evidence_root.
     """
+    evidence_root = PROJECT_ROOT / setting(paths, "agent", "evidence_root")
+    run, call, agent, file = next(job for job in (
+        (args.summary, run_summary, "B-2", "extended_record"),
+        (args.section_intros, run_section_intros, "B-2", "extended_record"),
+        (args.item_notes, run_item_notes, "B-2", "extended_record"),
+        (args.coverage, lambda *a: run_coverage(*a, evidence_root), "B-2", "extended_record"),
+        (args.plan, lambda *a: run_plan(*a, load_config(args.mapping)), "B-3", "plan_extended_record"),
+    ) if job[0])
+
     found = run_record(run, paths)
     if found is None:
-        return None, fail(f"no run record found at {run}")
+        return fail(f"no run record found at {run}")
     try:
         record = load_record(found)
-        extended, result = call(record, report, load_config(b2_derivations), agents)
+        extended, result = call(record, report, load_config(args.b2_derivations), agents)
         output = PROJECT_ROOT / setting(paths, "agent", "b2_output") / f"{record.run_id}_{file}.json"
     except (ConfigError, RecordParseError, ValueError) as error:
-        return None, fail(str(error))
+        return fail(str(error))
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(extended.to_dict(), indent=2) + "\n", encoding="utf-8")
     if result is None:
-        return None, fail(f"{agent} is disabled in agents.yaml")
-    return result, None
+        return fail(f"{agent} is disabled in agents.yaml")
 
-
-def summarise(run: Path, paths: dict, report: dict, b2_derivations: Path, agents: dict) -> int:
-    """--summary: B-2's executive summary for one run, derived from that run alone
-    with B-2's own derivation set (b2_derivations.yaml)."""
-    result, status = b2_run(run, paths, report, b2_derivations, agents, run_summary)
-    if result is None:
-        return status
     print(json.dumps(result, indent=2))
-    print(f"\n[{result['status']}]\n" + (result["output"]["text"] if result["output"] else "(nothing shown)"))
-    return 0
-
-
-def introduce(run: Path, paths: dict, report: dict, b2_derivations: Path, agents: dict) -> int:
-    """--section-intros: B-2's section introduction for each zone of one run."""
-    intros, status = b2_run(run, paths, report, b2_derivations, agents, run_section_intros)
-    if intros is None:
-        return status
-    print(json.dumps(intros, indent=2))
-    for zone, result in intros.items():
-        print(f"\n[{result['status']}] {zone}\n" + (result["output"]["text"] if result["output"] else "(nothing shown)"))
-    return 0
-
-
-def annotate(run: Path, paths: dict, report: dict, b2_derivations: Path, agents: dict) -> int:
-    """--item-notes: B-2's item note for each checkpoint of one run, in record order."""
-    notes, status = b2_run(run, paths, report, b2_derivations, agents, run_item_notes)
-    if notes is None:
-        return status
-    print(json.dumps(notes, indent=2))
-    for j, result in enumerate(notes):
-        print(f"\n[{result['status']}] checkpoints[{j}]\n" + (result["output"]["text"] if result["output"] else "(nothing shown)"))
-    return 0
-
-
-def state_coverage(run: Path, paths: dict, report: dict, b2_derivations: Path, agents: dict) -> int:
-    """--coverage: B-2's coverage statement for one run. Images resolve against agent.evidence_root."""
-    evidence_root = PROJECT_ROOT / setting(paths, "agent", "evidence_root")
-    result, status = b2_run(run, paths, report, b2_derivations, agents,
-                            lambda *args: run_coverage(*args, evidence_root))
-    if result is None:
-        return status
-    print(json.dumps(result, indent=2))
-    print(f"\n[{result['status']}]\n" + (result["output"]["text"] if result["output"] else "(nothing shown)"))
-    return 0
-
-
-def action_plan(run: Path, paths: dict, report: dict, b2_derivations: Path, agents: dict, mapping: Path) -> int:
-    """--plan: B-3's action plan for one run."""
-    try:
-        table = load_config(mapping)
-    except ConfigError as error:
-        return fail(str(error))
-    result, status = b2_run(run, paths, report, b2_derivations, agents,
-                            lambda *args: run_plan(*args, table), agent="B-3", file="plan_extended_record")
-    if result is None:
-        return status
-    print(json.dumps(result, indent=2))
-    print(f"\n[{result['status']}]\n" + (result["output"]["text"] if result["output"] else "(nothing shown)"))
+    # One envelope, or one per zone (dict) or per checkpoint (list).
+    if isinstance(result, list):
+        labelled = [(f"checkpoints[{j}]", env) for j, env in enumerate(result)]
+    elif "agent" in result:
+        labelled = [("", result)]
+    else:
+        labelled = list(result.items())
+    for label, env in labelled:
+        print(f"\n[{env['status']}] {label}".rstrip() + "\n" + (env["output"]["text"] if env["output"] else "(nothing shown)"))
     return 0
 
 

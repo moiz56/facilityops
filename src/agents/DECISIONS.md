@@ -398,3 +398,21 @@ traced as before.
 An excluded reading's row cites where its field sits
 (records[i].checkpoints[j].sensor.<block>.<field>), so its field and block
 names trace as keys; its value there is never shown.
+
+## D2 counts by value (derivation.py, derivations.yaml)
+
+Brief Q7 ("how many findings were recorded on the most recent run, by
+status?") needs every status counted, zeros included, and any status not on
+the list reported verbatim as its own row. One D2 instance per status cannot
+do the second: a value nobody configured is in no instance and drops out.
+
+So a D2 entry may name `by_value: <field>` (with optional `expected: [...]`)
+in place of `condition`. It is still D2, counting items of a scope over
+eligibility: not a ninth derivation. Its output has `field` and `by_value`
+({value, count, expected} per value: the expected values first, each at 0
+when absent, then any other value found, verbatim) in place of `condition`,
+`count` and `matching_ids`; population, inputs_excluded and excluded_items are
+as before. The derivation database gains d2_by_value (one row per value) and
+a `field` column on d2_condition_count. Beyond the brief's output shape;
+asked for directly. The finding-status instance is
+`condition_count_finding_status` in config/derivations.yaml (B-1 only).

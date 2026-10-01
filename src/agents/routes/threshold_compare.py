@@ -112,7 +112,8 @@ RULES FOR THE QUERY
   checkpoint_name; c.path AS path_c for value, delta, status or reason from
   d1_checkpoints; d.path AS path_d for any column from d1_threshold_compare.
   Select only the ones the shown columns need.
-- Every selected column needs its own plain name: alias clashes, e.g.
+- Every selected column needs its own plain name with no digits: alias
+  clashes, e.g.
   c.status AS checkpoint_status, d.status AS run_status.
 - Order by r.run_order, then c.position.
 

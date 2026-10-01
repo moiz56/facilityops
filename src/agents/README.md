@@ -1,606 +1,457 @@
-# The analytical agent (B-1)
+# The agent layer
 
-This folder holds the agent that answers questions about facility inspection
-runs. It answers two kinds of question:
+This folder turns inspection run records into words a facility manager can
+use. It holds three agents:
 
-- **Figures worked out over the runs**: "which checkpoints went over the
-  temperature limit in the latest run?", "what was the mean vibration in
-  rowA_back?", "on which days were runs taken?"
-- **Values looked up as recorded**: "what was the temperature at a3_back?",
-  "why is there no PM2.5 reading there?", "which images were taken at
-  a3_back?", "which zones did the route cover?"
+| Agent | What it does | Calls a model? |
+|---|---|---|
+| **B-1 Analytical** | Answers questions in plain English: "which checkpoints went over the temperature limit in the latest run?" | Yes: to understand the question and point at the answer |
+| **B-2 Narrative** | Writes the prose inside the report: an executive summary, a coverage statement, an introduction per zone, a note per checkpoint | Only to order the summary's paragraphs (optional) |
+| **B-3 Action plan** | Turns a run's findings into a prioritised, grouped list of actions | No (an optional opening sentence, off by default) |
 
-You ask in plain English; it answers in plain English, and every number in the
-answer comes with a citation that points at the exact place in the records it
-came from. When the answer lists evidence images, the answer PDF shows them.
-
-The one rule everything here is built around: **the language model never
-writes a number.** It reads the question, points at where the answer is, and
-writes a sentence of introduction. Code finds the values, writes them into the
-answer, and checks the whole answer before it is shown. If any value cannot be
-traced back to the records, the answer is refused rather than shown.
+**The one rule everything is built around: the model never writes a number.**
+Code finds every value, writes it into a template, and checks the finished
+text before anyone sees it. Every value carries a citation to the exact place
+in the records it came from. If a number cannot be traced, the text is refused
+rather than shown.
 
 ---
 
 ## Contents
 
-1. [The data it works on](#1-the-data-it-works-on)
-2. [The big picture](#2-the-big-picture)
-3. [Step by step: from records to the databases](#3-step-by-step-from-records-to-the-databases)
-4. [The eight derivations](#4-the-eight-derivations)
-5. [How a question is answered](#5-how-a-question-is-answered)
-6. [What can come back](#6-what-can-come-back)
-7. [Running it](#7-running-it)
-8. [Configuration](#8-configuration)
-9. [Testing](#9-testing)
-10. [Where things live](#10-where-things-live)
-11. [Changing things safely](#11-changing-things-safely)
+1. [The data](#1-the-data)
+2. [How data flows](#2-how-data-flows)
+3. [Quick start](#3-quick-start)
+4. [B-1: asking questions](#4-b-1-asking-questions)
+5. [B-2: the report's prose](#5-b-2-the-reports-prose)
+6. [B-3: the action plan](#6-b-3-the-action-plan)
+7. [Putting B-2 and B-3 in the report](#7-putting-b-2-and-b-3-in-the-report)
+8. [What every agent returns](#8-what-every-agent-returns)
+9. [Configuration](#9-configuration)
+10. [Testing](#10-testing)
+11. [Where things live](#11-where-things-live)
+12. [Changing things safely](#12-changing-things-safely)
 
 ---
 
-## 1. The data it works on
+## 1. The data
 
-An inspection robot drives a **route** around a facility. Each time it drives
-the route is a **run**, and each run is saved as a `run.json` record.
-
-The data is one hierarchy, each level inside the one above:
+An inspection robot drives a **route** around a facility. Each drive is a
+**run**, saved as a `run.json` record. Each run is one hierarchy:
 
 ```
 run                     one drive of the route
 └─ zone                 an area of the route, e.g. a row of racks
    └─ checkpoint        one stop in that zone, e.g. a single rack
-      ├─ status         whether the robot got there: COMPLETED or MISSED
+      ├─ status         did the robot get there: COMPLETED or MISSED
       ├─ result_status  the verdict: PASS, FAIL or WARN
-      ├─ readings       by sensor block, then field (environment → temperature_c)
-      └─ evidence       the images captured there
+      ├─ readings       accelerometer, environment, particulate
+      └─ evidence       the images captured there (RGB and thermal)
 ```
 
-A zone holds one checkpoint or several; when it holds one, the two often share
-a name. Each run has its own zones and checkpoints, so the same checkpoint has
-different values in different runs.
+A run also holds **findings** (what the robot noticed, with a severity and a
+recommended action), **sensor alerts**, **telemetry samples** (a reading every
+couple of seconds while driving) and an **event log**.
 
-During a run the robot records:
+Two ideas matter everywhere:
 
-| What | Where it comes from | Example |
+- **Missed is not failed.** A MISSED checkpoint was never reached, so it has no
+  real verdict. A FAILED one was reached and judged FAIL.
+- **Not every reading can be trusted.** A reading from a sensor that was
+  offline, disconnected or stale, or from a missed checkpoint, is *left out*
+  of every figure, and the reason is kept. This is called **eligibility**.
+
+---
+
+## 2. How data flows
+
+```
+                     run.json files
+                           │
+                           ▼
+                  load and parse (common/)
+                           │
+                           ▼
+          eligibility: which readings can be trusted
+                           │
+                           ▼
+       the derivations: figures worked out by code only
+       (means, maxima, counts, thresholds, rankings, ...)
+                           │
+                           ▼
+        EXTENDED RECORD = the records + every figure
+                           │
+        ┌──────────────────┼──────────────────────┐
+        ▼                  ▼                      ▼
+      B-1                 B-2                    B-3
+  all runs at once    one run at a time      one run at a time
+  two databases,      adds its own counts    groups the run's
+  a question in,      ("run values"), fills  findings into
+  an answer + PDF     templates, verifies    actions, verifies
+        │                  │                      │
+        ▼                  ▼                      ▼
+   answer PDF        report prose            action plan
+   output/b1_answers  (or CLI output)        (or CLI output)
+```
+
+**The derivations** are the only place arithmetic happens. There are eight
+kinds, fixed by the brief:
+
+| # | Derivation | Gives |
 |---|---|---|
-| Each checkpoint visit | one reading per stop, whether it was completed and whether it passed, and its images | `a3_back`: COMPLETED, PASS, 30.64 °C |
-| Telemetry samples | a reading every couple of seconds while driving, tagged with the zone | `sample_0042` in `rowA_back` |
-| Findings | things the robot noticed | a blocked aisle, severity warning |
-| Sensor alerts | threshold breaches logged during the run | high particulate |
-| The event log | run started, checkpoint completed, run completed | |
+| D1 | threshold compare | each checkpoint's reading against a limit, and how far over or under |
+| D2 | condition count | how many items meet a condition (e.g. result FAIL), and which |
+| D3 | proportion | the share of items meeting a condition |
+| D4 | group mean | the mean of a reading per zone |
+| D5 | group max | the highest reading per zone, and where it was |
+| D6 | rank top N | the N highest readings |
+| D7 | run set difference | which checkpoints only one of the last two runs had |
+| D8 | run date range | when runs were taken, and on which days |
 
-The sensors are an accelerometer (vibration), an environment sensor
-(temperature, humidity, pressure) and a particulate sensor (PM1.0 to PM10).
-
-Several runs are loaded at once, oldest first. Run ids start with when the run
-began, e.g. `20260819_114053-sis_racks_checkpoint_route`.
-
-**Missed is not failed.** A MISSED checkpoint was never reached, so it was
-never inspected: it has no verdict, and it did not fail. A FAILED checkpoint
-was reached, inspected, and its verdict was FAIL. The agent keeps the two
-apart everywhere.
+B-1 and B-2/B-3 use **separate derivation settings**: B-1 reads
+`config/derivations.yaml` over the whole corpus; B-2 and B-3 read
+`config/b2_derivations.yaml` over the one run they were given. They never run
+together, so changing one never affects the other.
 
 ---
 
-## 2. The big picture
+## 3. Quick start
 
-```
-  run.json files
-        │
-        ▼
-  ┌──────────────┐   Load every run, oldest first.
-  │  data_agent  │
-  └──────────────┘
-        │
-        ▼
-  ┌──────────────┐   Decide which readings can be trusted (eligibility),
-  │  derivation  │   then work out the eight kinds of figure for every run.
-  └──────────────┘
-        │                                   │
-        ▼                                   ▼
-  EXTENDED RECORD                     ELIGIBILITY VIEW
-  (records + figures)                 (run → zone → checkpoint → readings,
-        │                              kept or left out, and evidence)
-        ▼                                   ▼
-  ┌──────────────────┐              ┌──────────────────┐
-  │ derivation DB    │              │ lookup DB        │   two separate SQLite
-  └──────────────────┘              └──────────────────┘   databases; every row
-        │                                   │               remembers its path
-        │            a question             │
-        │                │                  │
-        │     ┌──────────▼───────────┐      │
-        │     │ retrieval router     │ (model) derivation, lookup or abstain?
-        │     └──────────┬───────────┘      │
-        │        ┌───────┴────────┐         │
-        ▼        ▼                ▼         ▼
-  ┌───────────────────┐    ┌───────────────────┐
-  │ derivation router │    │ lookup router     │   (model) which runs, zones,
-  │ SQL writer per    │    │ SQL writer per    │   checkpoints, and which
-  │ derivation type   │    │ lookup table      │   derivations or tables
-  └─────────┬─────────┘    └─────────┬─────────┘
-            └──────────┬─────────────┘
-                       ▼
-     guard (code) → facts, values traced (code) → slot filling (code)
-     → prose writer (model, no values) → verification (code)
-                       │
-                       ▼
-     an answer, its citations, its verification, and a PDF (with images)
-```
-
-Four model calls on either path: the retrieval router, the router, the SQL
-writer (one per derivation type or table), and the prose writer. Code runs
-between and after every one of them. The model only ever points or writes
-words; code does everything that touches a value.
-
----
-
-## 3. Step by step: from records to the databases
-
-### 3.1 Loading the runs (`data_agent.py`)
-
-Every record under the data directory (`data_agent/` by default) is parsed by
-`common/loader.py` and sorted oldest first by start time. A run with no start
-time sorts last rather than being dropped.
-
-### 3.2 Which readings can be trusted (`derivation.py`)
-
-Before anything is worked out, every reading goes through the **exclusion
-rule** (eligibility). A reading is left out when:
-
-1. the checkpoint was not completed (e.g. MISSED),
-2. the sensor was offline or not connected,
-3. the sensor's own health flag said it was faulty (e.g. `sps30_ok=false` for
-   the particulate sensor),
-4. the value itself is missing or not a number.
-
-Telemetry samples have no health flags of their own, so a sample is judged by
-its nearest checkpoint.
-
-Readings left out are never used, never shown as values and never replaced
-with a zero. They are kept with their reason instead, so an answer can say why
-a reading is missing. If nothing is left to work with, a figure is marked
-**NOT_COMPUTABLE** with its reason.
-
-### 3.3 The extended record (`derivation.py`)
-
-The eight derivations (next section) run over the trusted readings. Their
-results, together with the untouched records, form the **extended record**:
-
-```
-extended record
-├── records           the runs, exactly as loaded
-└── derived
-    ├── values        each derivation's figures, by name (one entry per run for D1-D6)
-    ├── excluded      per run: what was left out, where, and why
-    └── stale         readings that were used but were older than the limit
-```
-
-`python -m agents.main --all` writes it to `output/extended_record.json`.
-This is the only place in the agent where arithmetic happens.
-
-### 3.4 The derivation database (`database_derivation.py`)
-
-The extended record is copied into an in-memory SQLite database so the model
-can ask for exactly the rows it needs. Nothing is computed here: every value is
-copied, and every row carries a `path` column saying where in the extended
-record that value lives, e.g. `derived.values.threshold_compare[3].checkpoints.a3_back`.
-That path is what later becomes a citation.
-
-| Tables | Holds |
-|---|---|
-| `runs` | one row per run: status, times, the counts the robot reported |
-| `rec_*` | the records as written: checkpoint visits, findings, alerts, events, trusted readings, exclusions |
-| `d1_*` … `d8_*` | each derivation's figures, one table (or a few) per derivation |
-
-A copy is saved to `output/b1_database.sqlite` with a fingerprint of
-everything it was built from. On the next run, if nothing changed, the copy is
-reused instead of rebuilt.
-
-### 3.5 The eligibility view (`utils.eligibility_by_run`)
-
-Eligibility is regrouped into one tree that is easy to read and to build from:
-run → zone → checkpoint → sensor block. For each block it lists the readings
-that were **included** (all of a reading's fields together, e.g. `accel_x`,
-`accel_y` and `accel_z` in one entry) and the ones **excluded** (by reason,
-naming the fields). Each checkpoint also lists its **evidence**: its images,
-annotated images and finding images, as recorded.
-
-Everything carries a `path` into the records (`records[i].checkpoints[j]...`),
-the same form the citations use. Only the layout changes: every value, reason
-and count is eligibility's own.
-
-`--eligibility-json output/eligibility.json` writes it, for reading.
-
-### 3.6 The lookup database (`database_lookup.py`)
-
-Built from the eligibility view, kept separate from the derivation database
-so a query on one never reads the other. Telemetry samples are left out:
-lookups are about checkpoints.
-
-| Table | One row per | Holds |
-|---|---|---|
-| `runs` | run | run order, which is the latest |
-| `zones` | run and zone | the zones in the order the route reaches them |
-| `checkpoints` | run and checkpoint | zone, route position, status, result_status (NULL with a reason when left out) |
-| `checkpoint_readings` | visit and field | `included` with its value and time, or `excluded` with its reason |
-| `evidence` | image | the image path as recorded, its kind (evidence, annotated, finding) |
-
-Every row cites where it sits in the records: a reading's value is
-`records[i].checkpoints[j].sensor.environment.temperature_c`, an image is
-`records[i].checkpoints[j].evidence_images[k]`. A copy is saved to
-`output/b1_lookup_database.sqlite` with its own fingerprint.
-
----
-
-## 4. The eight derivations
-
-Each derivation is configured in `config/derivations.yaml`; each entry there
-is one named **instance** (e.g. `group_mean_temperature_c`). D1–D6 are worked
-out separately for every run; D7 and D8 look across runs.
-
-| | Type | What it answers | Example question |
-|---|---|---|---|
-| D1 | `threshold_compare` | Which checkpoints went over (or stayed under) a fixed limit, and by how much | "Which checkpoints exceeded 30 °C in the latest run?" |
-| D2 | `condition_count` | How many items meet a condition, which ones, and which were left out and why (a missed checkpoint is left out, never counted as failed) | "How many checkpoints failed, and which were missed?" |
-| D3 | `proportion` | What share of items meet a condition | "What percentage of checkpoints were completed?" |
-| D4 | `group_mean` | The average reading per zone, and the checkpoints in each zone | "Mean temperature in rowA_back?" |
-| D5 | `group_max` | The highest reading per zone, which checkpoint reached it and when | "Where was the peak vibration?" |
-| D6 | `rank_top_n` | The top N readings of the run, highest first, with their checkpoints | "The five hottest checkpoints?" |
-| D7 | `run_set_difference` | Which checkpoints the latest run and the one before it did not share | "Did the route change?" |
-| D8 | `run_date_range` | When runs took place: the period, the days with runs, runs per day | "On which days were runs taken?" |
-
-Some things none of them hold, on purpose, so the agent abstains rather than
-guess: the lowest reading, an average of averages, which items did *not* meet a
-condition, gaps between runs, and anything about why something happened.
-
----
-
-## 5. How a question is answered
-
-### 5.1 The retrieval router (`b1_retrieval_router.py`) — model call 1
-
-Decides which kind of retrieval can answer the question, and nothing else:
-
-| Reply | When | Goes to |
-|---|---|---|
-| `derivation` | a figure worked out from several values: how many, a share, an average, the highest, a ranking, over a limit, a change between runs, when runs happened | the derivation router |
-| `lookup` | recorded values of named items, with nothing worked out: a reading, a status, a zone, the route order, the images | the lookup router |
-| `abstain` | why something happened, what will happen, advice, a judgement, or anything the records do not hold | an abstention |
-
-The rule at the boundary: "the temperature at a3_back" is a lookup; "did
-a3_back go over the limit" and "the highest temperature in rowA_back" are
-derivations. Whether a name exists is not its job: it never abstains because
-a name is unfamiliar. `--classify "question"` runs this step alone.
-
-### 5.2 The routers — model call 2
-
-Both routers read the question and say what it is about, without answering
-it. They are shown every zone with the checkpoints inside it and the days runs
-were taken on, and they name runs, zones and checkpoints the same way (they
-share `PLACES`, `resolve_runs` and `check_places`):
-
-- **runs** can be `"all"`, positions (`1` is the oldest, `-1` the latest),
-  dates (`"2026-08-21"`), or a span of dates (`"2026-08-01/2026-08-31"`).
-  Written dates like 21/8/2026 are read day first.
-- **zones** and **checkpoints** are kept apart: "in rowA_back" is a zone, "at
-  a3_back" is a checkpoint. A loosely written name is matched to the list.
-
-**The derivation router** (`b1_analytical_router_derived.py`) also names the
-derivation instances the question needs:
-
-```json
-{"intent": "answer", "runs": [-1], "zones": [], "checkpoints": ["a3_back"],
- "derivations": ["group_mean_temperature_c"]}
-```
-
-**The lookup router** (`b1_analytical_router_lookup.py`) names the sensor
-fields and the lookup tables instead:
-
-```json
-{"intent": "answer", "runs": [-1], "zones": [], "checkpoints": ["a3_back"],
- "fields": ["temperature_c"], "tables": ["checkpoints", "checkpoint_readings"]}
-```
-
-Code then checks every name. A run position, date, zone or checkpoint the
-records do not hold means the question is about something that is not there,
-so the answer is an abstention. A reply that breaks a rule is sent back to the
-model with the reason. Every reply is held to a JSON schema by the model
-provider itself (structured output), so it cannot come back as prose or with
-extra keys.
-
-### 5.3 The SQL writer (`routes/`, `lookups/`) — model call 3
-
-Each derivation type has its own prompt in `routes/`, and each lookup table
-has its own in `lookups/`: one file each, all the same shape. A prompt shows
-the model exactly its tables (the database's own definitions, comments
-included) and explains how to read them: the data hierarchy, what each column
-means, which words in a question map to which columns, how to keep ties, and
-how to keep an answer complete when a list is empty. The model replies with
-one SELECT.
-
-| `lookups/` template | Answers |
-|---|---|
-| `checkpoints` | whether a checkpoint was completed, its verdict, its zone, the checkpoints in a zone, the route order |
-| `checkpoint_readings` | a reading's value, or why there is none; a whole block; every reading at a checkpoint |
-| `evidence` | the images at a checkpoint or in a zone, of a kind (annotated, thermal), or why there are none |
-| `zones` | the zones a route covered, their order, the zone before or after another, each zone's checkpoints |
-
-The query is run through a **guard** (`database_derivation.run_query`), on
-whichever database the path uses:
-
-- only reads are allowed, and only a few harmless functions (no COUNT, SUM,
-  AVG, MIN or MAX — every count is already in a table);
-- it stops at a time limit and fails if it returns too many rows.
-
-Code then checks the result: every column must have a plain name, each value
-must come with a path column, and the runs and checkpoints returned must be
-the ones the router named. Anything wrong goes back to the model with the
-reason.
-
-If the query returns no rows, code runs the route's own summary query instead
-and says so ("the search for this question returned no rows; the stored
-result for the runs asked about, shown instead"), so the reader still sees
-what the records hold.
-
-### 5.4 Writing the facts (`b1_analytical.py`, `slots.py`)
-
-Code turns the rows into the answer's facts. Each run gets a heading, and each
-row becomes one line:
-
-```
-Run {{ q0_r0_run_id }}
-- checkpoint id {{ q0_r0_checkpoint_id }}, delta {{ q0_r0_delta }}
-```
-
-Each `{{ slot }}` is traced to the exact place in the extended record that
-holds that value. If a value cannot be traced (the model renamed or calculated
-something), the query is sent back.
-
-**Slot filling** then writes the values in, formatted the same way the report
-formats them (decimals from `report.yaml`, dates in the run's own time zone),
-and records the character span of every value. Those spans are the citations.
-
-**One exception: exclusion reasons.** Why a reading was left out
-("sps30_ok=false", "sensor status is offline") is eligibility's verdict, and
-no field in the records holds that text. A lookup template can name such
-columns in `TEXT_COLUMNS` (only `checkpoint_readings` does: `reason`). They are
-written into the facts as code wrote them, with no citation, and verification
-skips only those spans. Every value, id, field name and time is still traced.
-
-### 5.5 The prose writer (`b1_analytical_prose.py`) — model call 4
-
-The model sees the question and the filled facts, and writes one or two
-sentences to go above them, e.g. "That checkpoint was read in the latest run,
-so its temperature is shown below along with when it was taken."
-
-It reads like a person answering: it opens with the answer, joins its parts
-with ordinary linking words, and ends by saying how the facts below are laid
-out. Its reply may contain **no values and no names at all**: no digits, no
-number or ordinal words, no ids, not even a name the question used; it says
-"this checkpoint" or "that zone" instead. A reply that breaks this is sent
-back with what to write instead. If no reply passes, the facts are shown on
-their own.
-
-The facts are marked as data in the prompt, so text copied from the records
-(checkpoint names, notes) cannot act as instructions to the model.
-
-### 5.6 Verification (`verification.py`)
-
-The whole answer, lead-in and facts, is checked once more. Every number-like
-token is found, classified (measurement, count, identifier, timestamp,
-version, ordinal) and matched against the extended record. Text values placed
-by slot filling (like a checkpoint name) are checked against their own field.
-If anything fails, the answer is not shown.
-
----
-
-## 6. What can come back
-
-Every answer is wrapped in an **envelope** (`envelope.py`) with one of four
-statuses:
-
-| Status | Meaning |
-|---|---|
-| `OK` | Answered and verified. Also used for an abstention ("the records do not contain this"), which the PDF shows as **ABSTAINED**. |
-| `DEGRADED_TEMPLATE_ONLY` | The facts are verified, but the model's lead-in never passed, so the facts are shown alone. |
-| `REFUSED_UNVERIFIABLE` | Nothing is shown: the model never produced a valid reply, or the answer failed verification. |
-| `PROVIDER_UNAVAILABLE` | The model could not be reached. |
-
-The output holds the `answer`, its `citations` (each a character span and the
-path it came from) and `records_consulted` (the runs the values came from).
-
-Each answer is also written as a **PDF** (`b1_answer_pdf.py`) in
-`output/b1_answers/`: the question, the answer with every value numbered, where
-each value came from, the runs consulted, the verification result and the SQL
-that was run. It uses the report's own stylesheet.
-
-**Evidence images.** When the answer cites evidence images, the PDF draws
-them under the answer, the way the report draws a checkpoint's evidence: one
-grid per run and checkpoint, the RGB and thermal of one view in one cell,
-sized down before they are embedded. It reuses the report's own code
-(`common.paths.resolve_evidence`, `report.images`). Only the images the answer
-cites are drawn. An image whose file cannot be found or read says so in its
-cell.
-
-When you run from the command line, a **trace** is printed too: the retrieval
-decision, every model reply, whether code accepted or rejected it and why, the
-query, and each value with the path it was traced to. This is the first place
-to look when an answer is wrong.
-
----
-
-## 7. Running it
-
-From the project root, with the virtual environment active. All commands need
-`PYTHONPATH=src`.
+From the project root:
 
 ```bash
 source venv/bin/activate
+```
+
+Put the model's API key in a `.env` file at the project root (it is never
+written to a config file or a log):
+
+```
+ANTHROPIC_API_KEY=...        # or GEMINI_API_KEY, matching agents.yaml provider.name
+```
+
+Every command runs as `PYTHONPATH=src python -m agents.main ...`. The most
+useful ones:
+
+```bash
+# B-1: ask a question (all runs in data_agent/)
+PYTHONPATH=src python -m agents.main --ask "which checkpoints failed in the latest run?"
+
+# B-2: the four prose parts, for one run (a run directory or its run.json)
+PYTHONPATH=src python -m agents.main --summary         data_agent/<run_dir>
+PYTHONPATH=src python -m agents.main --coverage        data_agent/<run_dir>
+PYTHONPATH=src python -m agents.main --section-intros  data_agent/<run_dir>
+PYTHONPATH=src python -m agents.main --item-notes      data_agent/<run_dir>
+
+# B-3: the action plan, for one run
+PYTHONPATH=src python -m agents.main --plan data_agent/<run_dir>
+
+# The report, with whichever agent parts are switched on in report.yaml
+PYTHONPATH=src python -m report.cli --record data_agent/<run_dir>/run.json
+```
+
+---
+
+## 4. B-1: asking questions
+
+B-1 answers questions over **all the runs** in the data directory. It answers
+three kinds:
+
+| Kind | Example | Comes from |
+|---|---|---|
+| A figure | "which checkpoints went over the temperature limit?", "mean vibration per zone" | a derivation |
+| A recorded detail | "which findings need review?", "what was missed and why?", "how did the latest run end?" | the run's own records |
+| A recorded value of one item | "the temperature at a3_back", "which images were taken there?", "which zone is a3_back in?" | the lookup tables |
+
+Anything else (why something happened, a prediction, a judgement, something
+the records do not hold) gets the answer **"the records do not contain this"**.
+
+### How a question is answered
+
+```
+question
+   │
+   ▼  model 1  retrieval router: a figure/record, a lookup, or abstain?
+   ▼  model 2  router: which runs, zones, checkpoints, and which figure or table
+   ▼  model 3  SQL writer: one SELECT over the right database
+   ▼  code     guard: read-only, a few safe functions, a row limit
+   ▼  code     the rows become facts; every value is traced to its path
+   ▼  model 4  prose writer: one or two sentences, no values, no names
+   ▼  code     verification: every number checked against the records
+answer + citations + PDF
+```
+
+B-1 keeps **two SQLite databases**, built once and reused until the data or
+code changes:
+
+- the **derivation database**: every figure, plus the run's own records
+  (checkpoints, findings, alerts, events)
+- the **lookup database**: each checkpoint's readings (kept or left out, and
+  why), status, zone and evidence
+
+### Commands
+
+```bash
+# Ask end to end: prints the answer, its envelope and a full trace, writes a PDF
+PYTHONPATH=src python -m agents.main --ask "QUESTION"
+
+# Only the first step: derivation, lookup or abstain
+PYTHONPATH=src python -m agents.main --classify "QUESTION"
+
+# The first two steps: prints the route it chose
+PYTHONPATH=src python -m agents.main --router "QUESTION"
 
 # Work out every figure and write output/extended_record.json
 PYTHONPATH=src python -m agents.main --all --hide-eligible
 
-# Write the eligibility view (run → zone → checkpoint, kept and left out, evidence) as JSON
+# Write the eligibility view (run → zone → checkpoint, kept and left out)
 PYTHONPATH=src python -m agents.main --eligibility-json output/eligibility.json --hide-eligible
-
-# Only the retrieval router: derivation, lookup or abstain (one model call)
-PYTHONPATH=src python -m agents.main --classify "what was the temperature at a3_back?"
-
-# The retrieval router, then the router it picks (two model calls)
-PYTHONPATH=src python -m agents.main --router "which checkpoints failed on 21/8/2026?"
-
-# Ask a question end to end: prints the envelope and trace, writes a PDF
-PYTHONPATH=src python -m agents.main --ask "which images were taken at a3_back in the latest run?"
 ```
 
-Other flags, handy while debugging:
+The answer PDF goes to `output/b1_answers/`. It shows the question, the answer
+with every value numbered, where each value came from, the verification
+result, the SQL that ran, and any evidence images the answer cites.
 
-| Flag | Does |
-|---|---|
-| `--field environment.temperature_c` | Show which readings of one field are trusted and which are left out |
-| `--verify "TEXT"` | Run verification on a piece of text |
-| `--fill "TEXT" --slot ID=PATH` | Fill `{{ ID }}` slots by hand, then verify |
-| `--data-dir DIR` | Read runs from another directory |
-| `--output FILE` | Write the extended record somewhere else |
+When an answer looks wrong, read the **trace** printed by `--ask`: every model
+reply, whether code accepted it and why, the query, and each value's path.
 
-`stub.py` at the project root runs both routers over every question in
-`config/b1_question_set.yaml` and prints what each one replied:
+---
+
+## 5. B-2: the report's prose
+
+B-2 writes four parts for **one run**. Code writes every sentence from a
+template in `templates/`; each value goes in as a cited slot.
+
+| Part | Where it goes in the report | What it says |
+|---|---|---|
+| **Executive summary** | first page after the cover | when and how the run went, what passed and failed (failed checkpoints grouped), the headline zone mean, and short pointers to the coverage statement |
+| **Coverage statement** | below the summary, same page | completion and every missed checkpoint with its reason, evidence and thermal coverage, images referenced and resolved, sensor availability, and every count the record declares that disagrees with its data |
+| **Section introduction** | under each zone heading | how many checkpoints the zone covers, samples recorded, and each mean with usable/excluded samples and its rank among zones |
+| **Item note** | at the top of each checkpoint | one of: missed (with reason), no evidence (with findings), a sensor warning (with the reading), or normal (what was photographed) |
+
+**The model's only job** is to choose the order of the summary's paragraphs. It
+sees what each paragraph is about, never its text. With
+`b2_narrative.prose: false`, or no API key, code's order is used instead. The
+other three parts never call a model.
+
+B-2 adds its own **run values** (counts no derivation gives, formatted dates,
+per-checkpoint and per-zone figures) to the run's extended record, so they
+can be cited like any other field.
+
+### Commands
 
 ```bash
-PYTHONPATH=src python stub.py                 # the canonical questions
-PYTHONPATH=src python stub.py --paraphrases   # and every paraphrase
+PYTHONPATH=src python -m agents.main --summary        data_agent/<run_dir>
+PYTHONPATH=src python -m agents.main --coverage       data_agent/<run_dir>
+PYTHONPATH=src python -m agents.main --section-intros data_agent/<run_dir>
+PYTHONPATH=src python -m agents.main --item-notes     data_agent/<run_dir>
 ```
 
-The model API key goes in a `.env` file at the project root
-(`ANTHROPIC_API_KEY` or `GEMINI_API_KEY`); it is never written to a config
-file or a log.
+Each prints the envelope(s) as JSON, then the text, and writes the run's
+extended record to `output/b2/<run_id>_extended_record.json`.
 
 ---
 
-## 8. Configuration
+## 6. B-3: the action plan
 
-Nothing is read from a config file when a module is imported: `main.py` reads
-each file once and passes the settings down.
+B-3 turns **one run's findings** into actions. It never writes an action: each
+finding already carries a `recommended_action`, and B-3 carries it **word for
+word**. What it adds:
 
-| File | Holds |
+- **a category** for each finding type, from `config/action_mapping.yaml`
+- **a priority**: severity first (fail, then warning, then info), then the
+  category's rank, then route order. Equal priorities are allowed.
+- **grouping**: findings of one type with the same action become one row
+  ("4 findings at a5_back, a6_back, ...") instead of repeating the action
+- **unmapped types**: a finding type with no configured category is stated
+  plainly, never guessed. `airflow_obstruction` is deliberately unmapped.
+
+B-3 makes **no model call** by default (`b3_action.prose: false`). Switched on,
+the model adds one opening sentence and nothing else.
+
+### Command
+
+```bash
+PYTHONPATH=src python -m agents.main --plan data_agent/<run_dir>
+```
+
+It prints the envelope and the plan as text, and writes
+`output/b2/<run_id>_plan_extended_record.json`. Use `--mapping PATH` for a
+different action mapping.
+
+---
+
+## 7. Putting B-2 and B-3 in the report
+
+The report engine (`src/report`) calls the agents for the run it renders.
+Each part has its own switch under `sections:` in `config/report.yaml`:
+
+| Switch | Puts in the report |
 |---|---|
-| `config/agent_path.yaml` | Where the runs are, where the evidence images are, and where the extended record, both databases and the PDFs go |
-| `config/derivations.yaml` | The derivation instances and their settings, named conditions, eligibility rules, date formats |
-| `config/agents.yaml` | The model provider and model, attempts per step, question length limit, verification settings, database limits |
-| `config/report.yaml` | Shared with the report: decimal places per field, sensor health flags, stale age, evidence path prefix, image size limit |
+| `executive_summary: true` | the executive summary, after the cover |
+| `coverage_statement: true` | the coverage statement, below the summary |
+| `action_plan: true` | the action plan as a table, after the summary page |
+| `section_intros: true` | an introduction under each zone heading |
+| `item_notes: true` | a note at the top of each checkpoint |
 
-In `agent_path.yaml`:
+Then generate the report as usual:
 
-- `data_dir` — the run records (`data_agent`).
-- `database` / `lookup_database` — the saved copies of the two databases.
-- `evidence_root` — where evidence image paths resolve, after the recorded
-  prefix (`/run-files`) is stripped, as the report's `--evidence-root`.
-- `b1_answers` — where answer PDFs go.
+```bash
+PYTHONPATH=src python -m report.cli --record data_agent/<run_dir>/run.json
+```
 
-Settings worth knowing in `agents.yaml`:
+The report order with everything on: cover, executive summary and coverage
+statement, action plan, contents, coverage, findings, alerts, zone telemetry,
+checkpoints (with intros and notes), run summary.
 
-- `provider.name` / `provider.model` — Claude or Gemini, and which model. The
-  model must accept a temperature setting.
-- `agents.b1_analytical.max_attempts` — how many tries each model step gets
-  before giving up (the first try included).
-- `agents.b1_analytical.max_question_chars` — a longer question is refused,
-  never cut short.
-- `database.max_rows` / `database.timeout_seconds` — the query guard's limits.
-- `verification.numeric_tolerance` — how far a number may be from the record
-  and still pass (it is then logged as an anomaly).
+If an agent is switched off in `agents.yaml`, refuses its text, or fails, the
+report is still produced without that part, and the log says why. A part is
+never shown empty or half-written.
 
 ---
 
-## 9. Testing
+## 8. What every agent returns
 
-`tests/b1_derivations/` holds one question suite per derivation, `D1_test.py`
-to `D8_test.py`. Each case is a question and the status its answer should get:
+Every output is wrapped in the same **envelope** (`envelope.py`):
 
-```python
-CASES = [
-    ("Which checkpoints went over the temperature limit in the latest run?", "OK"),
-    ("Mean humidity per zone in the latest run?", "ABSTAINED"),
-]
+```json
+{
+  "agent": "B-2",
+  "agent_version": "0.2.0",
+  "model": null,
+  "prompt_version": "narrative_v1",
+  "source_run_ids": ["<run_id>"],
+  "generated_at": "2026-10-01T09:00:00Z",
+  "status": "OK",
+  "output": { "text": "...", "citations": [ { "claim_span": [56, 78], "source_field": "..." } ] },
+  "verification": { "method": "deterministic", "numeric_tokens_emitted": 7, "numeric_tokens_verified": 7, ... }
+}
 ```
 
-They call the real model, so they need the API key. Every question now goes
-through the retrieval router first, so a derivation question it sends to
-lookup shows up in these suites too. For every case they write the answer PDF
-and a JSON file with the envelope and the full trace to
-`tests/output/b1/<derivation>/`, before the check, so a failing case can
-always be read afterwards.
+| Status | Meaning |
+|---|---|
+| `OK` | Produced and verified. For B-1 this also covers "the records do not contain this". |
+| `DEGRADED_TEMPLATE_ONLY` | Verified, but the model's part was skipped (no provider, or no valid reply), so code's version is shown. |
+| `REFUSED_UNVERIFIABLE` | Nothing is shown: a value could not be traced to the records. |
+| `PROVIDER_UNAVAILABLE` | The model could not be reached (B-1). |
+
+`model` is `null` and `method` is `deterministic` whenever no model was called.
+That is the normal case for B-3 and for three of B-2's four parts.
+
+---
+
+## 9. Configuration
+
+Nothing is read from a config file when a module is imported: the entry point
+reads each file once and passes the settings down.
+
+| File | Holds | Used by |
+|---|---|---|
+| `config/agent_path.yaml` | where the runs, evidence images and outputs are | all |
+| `config/agents.yaml` | the model provider, each agent's switches, verification settings, database limits | all |
+| `config/derivations.yaml` | the derivation instances B-1 offers | B-1 |
+| `config/b2_derivations.yaml` | the per-run derivations B-2 and B-3 use | B-2, B-3 |
+| `config/action_mapping.yaml` | finding type → category, category ranks, severity ranks | B-3 |
+| `config/report.yaml` | shared with the report: decimals, units, sensor flags, which report sections are on | all |
+
+Settings you are most likely to change:
+
+| Setting | In | Does |
+|---|---|---|
+| `provider.name`, `provider.model` | `agents.yaml` | Claude or Gemini, and which model (it must accept a temperature) |
+| `agents.<agent>.enabled` | `agents.yaml` | switch an agent off entirely |
+| `agents.<agent>.prose` | `agents.yaml` | allow or forbid that agent's model call |
+| `agents.b2_narrative.warning_fields`, `metric_names` | `agents.yaml` | which reading a sensor warning is about, and how a sentence names it |
+| `categories` | `action_mapping.yaml` | category ranks for B-3's priority (placeholders until the client confirms) |
+| `units`, `decimals` | `report.yaml` | how a value prints, e.g. `temperature_c: "°C"` |
+| `data_dir`, `evidence_root`, `b2_output` | `agent_path.yaml` | where runs, images and B-2/B-3 output live |
+
+---
+
+## 10. Testing
+
+`tests/b1_derivations/` holds one question suite per derivation
+(`D1_test.py` to `D8_test.py`). Each case is a question and the status its
+answer should get. They call the real model, so they need the API key. Each
+case writes its answer PDF and full trace to `tests/output/b1/` before it is
+checked, so a failing case can be read afterwards.
 
 ```bash
 PYTHONPATH=src pytest tests/b1_derivations -v
 PYTHONPATH=src pytest tests/b1_derivations/D4_test.py -v
 ```
 
-Question lists to run by hand:
+`stub.py` at the project root is the **question-set suite**: every question
+in `config/b1_question_set.yaml` (the brief's twenty, TB-04), answered end to
+end. A must-abstain question passes when it abstains; every other one passes
+when it is answered (OK, or DEGRADED_TEMPLATE_ONLY). PDFs and traces go to
+`tests/output/b1/question_set/`.
 
-- `B1_QUESTIONS.txt` — questions across the eight derivations, with the
-  expected result.
-- `B1_LOOKUP_QUESTIONS.txt` — twenty questions for the retrieval router, each
-  lookup template, the boundary with derivations, and abstentions.
+```bash
+PYTHONPATH=src pytest stub.py -v                        # the 20 canonical questions
+PYTHONPATH=src pytest stub.py -v -k Q07                 # one question
+B1_PARAPHRASES=1 PYTHONPATH=src pytest stub.py -v       # and every paraphrase
+```
 
-Some questions can reasonably be answered by more than one derivation (the
-single highest reading is in both D5 and D6); the trace shows which route was
-taken.
+More questions to try by hand: `B1_QUESTIONS.txt` and `B1_LOOKUP_QUESTIONS.txt`.
 
 ---
 
-## 10. Where things live
+## 11. Where things live
+
+**Shared**
 
 | File | Job |
 |---|---|
-| `main.py` | The command line: reads config, runs the steps asked for |
-| `data_agent.py` | Finds and loads the run records, oldest first |
-| `derivation.py` | The exclusion rule and the eight derivations; builds the extended record |
-| `database_derivation.py` | Builds the derivation database; the query guard; saving and reusing a database copy |
-| `database_lookup.py` | Builds the lookup database from the eligibility view |
-| `b1_analytical.py` | Runs B-1 end to end: retrieval router, router, SQL writer, facts, prose, verification |
-| `b1_retrieval_router.py` | Model call 1: derivation, lookup or abstain |
-| `b1_analytical_router_derived.py` | Model call 2 for a derivation: runs, zones, checkpoints, derivations |
-| `b1_analytical_router_lookup.py` | Model call 2 for a lookup: runs, zones, checkpoints, fields, tables |
-| `routes/` | Model call 3 for a derivation: one SQL writer prompt per derivation type |
-| `lookups/` | Model call 3 for a lookup: one SQL writer prompt per lookup table |
-| `b1_analytical_prose.py` | Model call 4: the lead-in sentence |
-| `slots.py` | Writes values into templates and records where each one landed |
-| `verification.py` | Checks every number-like token against the records |
-| `envelope.py` | The shape every answer is returned in |
-| `b1_answer_pdf.py`, `templates/b1_answer.j2` | The answer PDF, with evidence images |
-| `provider.py` | Talks to Claude or Gemini over their REST APIs |
-| `schema.py` | The agent's data types |
-| `utils.py` | Shared helpers: formatting, config parsing, printing, the eligibility view |
-| `DECISIONS.md` | Why things are the way they are, and where the design goes beyond the brief |
+| `main.py` | the command line |
+| `data_agent.py` | loads every run record, oldest first |
+| `derivation.py` | eligibility and the eight derivations; builds the extended record |
+| `slots.py` | writes values into templates and records where each landed |
+| `verification.py` | checks every number-like token in a text against the records |
+| `envelope.py` | the shape every output is returned in |
+| `provider.py` | talks to Claude or Gemini |
+| `schema.py`, `utils.py` | data types; shared helpers and config parsing |
+
+**B-1**
+
+| File | Job |
+|---|---|
+| `b1_analytical.py` | runs a question end to end |
+| `b1_retrieval_router.py` | model call 1: figure/record, lookup or abstain |
+| `b1_analytical_router_derived.py`, `b1_analytical_router_lookup.py` | model call 2: what the question is about |
+| `routes/`, `lookups/` | model call 3: one SQL prompt per derivation type or lookup table |
+| `b1_analytical_prose.py` | model call 4: the lead-in sentence |
+| `database_derivation.py`, `database_lookup.py` | the two databases and the query guard |
+| `b1_answer_pdf.py` | the answer PDF |
+
+**B-2 and B-3**
+
+| File | Job |
+|---|---|
+| `b2_narrative.py` | the four prose parts and their run values |
+| `b3_action.py` | the action plan |
+| `templates/` | one template per part: `executive_summary.j2`, `coverage_statement.j2`, `section_intro.j2`, `item_note.j2`, `b3_action.j2`, `b1_answer.j2` |
+
+`DECISIONS.md` records why things are the way they are, and where the design
+goes beyond the brief.
 
 ---
 
-## 11. Changing things safely
+## 12. Changing things safely
 
-- **Add an instance of an existing derivation** (e.g. a D4 mean for humidity):
-  add an entry to `config/derivations.yaml`. The derivation, its database
-  table, the router's description and the SQL writer's tables all follow from
-  it. The field needs a decimals entry in `report.yaml`.
-- **Change what a derivation outputs**: change `derivation.py`, then its
-  loader and table in `database_derivation.py`, then its prompt in `routes/`.
-  The table definitions are shown to the model as they are, so their comments
-  are part of the prompt.
-- **Add a lookup table**: add its DDL and loader to `database_lookup.py`, its
-  name to `TABLES` there, a description to `DESCRIPTIONS` in
-  `b1_analytical_router_lookup.py`, and a template in `lookups/` (registered
-  in `lookups/__init__.py`). Give every row a `path` into the records, so its
-  values can be cited.
-- **Turn a derivation route off for a while**: comment out its line in
-  `routes/__init__.py`. Neither router offers it then; its figures are still
-  worked out and stored.
-- **Change a prompt**: prompts are plain text in `b1_retrieval_router.py`,
-  both routers, `routes/*.py`, `lookups/*.py` and `b1_analytical_prose.py`.
-  Keep them free of real zone and checkpoint names: examples use `<zone>` and
-  `<checkpoint>`, and the real names come from the records at run time.
-  Re-run the relevant test suite afterwards.
-- **The records route** (answering from the raw records rather than a
-  derivation) exists in `routes/records.py` but is switched off in the router
-  for now; the lines to switch it back on are commented in
-  `b1_analytical_router_derived.py`.
+- **Change wording** in B-2 or B-3: edit its template in `templates/`. Keep
+  digits and number words out of the template's own text; every value must go
+  in as a slot, or verification refuses the text.
+- **Add a figure B-1 can answer**: add an instance to `config/derivations.yaml`.
+  Its database table, the router's description and the SQL writer follow from
+  it. The field needs a `decimals` entry in `report.yaml`.
+- **Add a figure B-2 uses**: add it to `config/b2_derivations.yaml`. B-1 is
+  unaffected.
+- **Map a new finding type** for B-3: add it under `features` in
+  `config/action_mapping.yaml`. Never map a type because its name sounds like
+  another.
+- **Change a prompt**: prompts are plain text in the B-1 modules, `routes/`
+  and `lookups/`. Use `<zone>` and `<checkpoint>` in examples, never real
+  names. Re-run the relevant test suite afterwards.
 - **Record why**: when a change goes beyond the brief or makes a non-obvious
   choice, add a note to `DECISIONS.md`.

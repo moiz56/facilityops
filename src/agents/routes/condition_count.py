@@ -2,8 +2,9 @@
 
 Used when the router names a condition_count instance: the SQL writer fills
 the placeholders and asks the model for one SELECT over the runs and D2 tables
-only: the counts, the items that met the condition, and the items left out
-and why. Nothing here calls the model or runs the query.
+only: the counts, the items that met the condition, the per-value counts of a
+count by value, and the items left out and why. Nothing here calls the model
+or runs the query.
 """
 
 from agents.database_derivation import D2, RUNS
@@ -35,7 +36,8 @@ code writes the answer from the rows your query returns.
 
 The question is about a count: in each run, which items (checkpoints, findings
 or sensor alerts) meet a named condition, how many do, and out of how many
-could be checked.
+could be checked; or, for a count by value, how many items have each value of
+one field.
 
 TABLES
 {schema}
@@ -65,6 +67,13 @@ HOW TO READ THE TABLES
   row covers: 2 for a checkpoint visited twice. Use it for "which checkpoints
   were left out", "why was <checkpoint> not counted" or "which were missed".
   Its counts add up to inputs_excluded; never add them yourself.
+- d2_by_value holds a count by value (its d2_condition_count row has field
+  set and condition and count NULL): one row per value of the field in each
+  run, value and count. The expected values come first, each listed even when
+  count is 0; any other value found follows, verbatim. For "how many by
+  status" or "a breakdown", select every row: a 0 is part of the answer, so
+  never filter count > 0. For one value ("how many need review"), filter
+  b.value. Never select b.expected: filter on it if you need it.
 - An item is either counted (in population), or excluded (in
   d2_excluded_items). Of the counted items, only the ones that met the
   condition are stored. Which counted items did not meet it cannot be read
@@ -143,11 +152,13 @@ RULES FOR THE QUERY
   ON d.instance = m.instance AND d.run_id = m.run_id.
 - Path columns, so code can find each value in the records:
   r.path AS path_r for run_id; m.path AS path_m for item_id; x.path AS path_x
-  for any column from d2_excluded_items; d.path AS path_d for any column from
-  d2_condition_count. Select only the ones the shown columns need.
-- Every selected column needs its own plain name: alias clashes.
-- Order by r.run_order, then m.position or x.position for item rows, or
-  d.instance for count rows.
+  for any column from d2_excluded_items; b.path AS path_b for value and count
+  from d2_by_value; d.path AS path_d for any column from d2_condition_count.
+  Select only the ones the shown columns need.
+- Every selected column needs its own plain name with no digits: alias
+  clashes, e.g. d.reason AS count_reason, x.reason AS excluded_reason.
+- Order by r.run_order, then m.position, x.position or b.position for item
+  and value rows, or d.instance for count rows.
 
 EXAMPLES
 Which checkpoints failed:
@@ -183,6 +194,11 @@ Which checkpoints were left out of the count, for any reason, and why:
   FROM d2_excluded_items x JOIN runs r ON r.run_id = x.run_id
   WHERE x.instance = '<instance>' AND x.run_id IN (<run_ids>)
   ORDER BY r.run_order, x.position
+How many findings were recorded, by status (every status, zeros included):
+  SELECT r.run_id, b.value, b.count, b.path AS path_b, r.path AS path_r
+  FROM d2_by_value b JOIN runs r ON r.run_id = b.run_id
+  WHERE b.instance = '<instance>' AND b.run_id IN (<run_ids>)
+  ORDER BY r.run_order, b.position
 How many checkpoints passed and how many failed:
   SELECT r.run_id, d.condition, d.count, d.path AS path_d, r.path AS path_r
   FROM d2_condition_count d JOIN runs r ON r.run_id = d.run_id

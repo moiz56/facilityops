@@ -72,26 +72,9 @@ checkpoints: the checkpoints the question names, written as after a colon in
 #   {places}       PLACES: how to name the runs, zones and checkpoints
 #   {question}     the user's question
 #   {feedback}     empty on the first call; why the previous reply was rejected after that
-# RECORDS is left out for now. To put it back, uncomment the RECORDS lines
-# below and restore this section in PROMPT, after the date range paragraph:
-# THE RECORDS THEMSELVES
-# "records" is not a figure: it is what each run wrote down, as written. Name it
-# when the question asks for a detail a run recorded:
-# - the run itself: its facility, status, final result, start and end time,
-#   duration, and the counts the robot reported for itself
-# - what happened at a checkpoint: whether it was completed or missed and why,
-#   its result, what was observed, the notes
-# - the findings (what, where, how severe, whether they need review, the
-#   recommended action), the sensor alerts, and the run's event log
-# - a single sensor reading at a checkpoint or at a time, or why a reading is
-#   missing
-# It works nothing out: it has no counts, averages, maxima or comparisons of its
-# own. So when the question asks for a figure, name the figure above that holds
-# it, never records. When it asks how many, an average, the highest or a
-# comparison and no figure above holds it, abstain; records will not work it
-# out. A question can need both, e.g. a count and the notes of the checkpoints
-# it counts: name both.
-PROMPT = """You are the first step in answering a question about facility inspections.
+PROMPT = """You are the second step in answering a question about facility inspections.
+An earlier step decided this question needs a figure worked out over the
+runs, or a detail the runs recorded.
 
 HOW THIS WORKS
 An inspection robot drives a route of checkpoints around a facility. Each time
@@ -103,15 +86,19 @@ The route is laid out in two levels: zones, and checkpoints inside them.
 - A zone is an area of the route.
 - A checkpoint is one stop in a zone. A zone can hold several checkpoints,
   or just one; then the two often share a name.
-- Telemetry samples are logged every couple of seconds while the robot
-  drives, each tagged with the zone it was in, not with a checkpoint.
-So a figure worked out per zone covers every reading in that zone. A question
-about a checkpoint gets the figure of the zone it is in, when the figure is
-per zone.
+- Readings come from two sources: the one reading taken at each checkpoint
+  stop, and telemetry samples logged every couple of seconds while the robot
+  drives, each tagged with the zone it was in and its nearest checkpoint.
+A figure worked out per zone uses the source its line below names, grouped
+by zone: with checkpoints, the readings taken at that zone's stops. Only
+readings that could be trusted go into it. A question about a checkpoint
+gets the figure of the zone it is in, when the figure is per zone.
 
-Some figures have already been worked out for every run, listed below. You
-say which runs, zones, checkpoints and which of these the question is about;
-the next step then fetches exactly those and writes the answer. So you only need to point at the right things.
+Some figures have already been worked out for every run, and the runs' own
+records are held as written; both are listed below. You say which runs,
+zones, checkpoints and which of these the question is about; the next step
+then fetches exactly those and writes the answer. So you only need to point
+at the right things.
 
 WHAT CAN BE FETCHED
 {derivations}
@@ -139,6 +126,11 @@ itself.
   on, and the items left out of the count with the reason each was left out
   (e.g. a missed checkpoint). Of the items it checked, it keeps only the ones
   that meet the condition, never the others.
+- A count by value counts every value of one field instead of one condition,
+  as its line says: for each run, how many items have each value, every
+  expected value listed even at 0, and any other value found. Use it for
+  "how many findings by status", "a breakdown of", or how many have one value
+  of that field.
 - A share takes a condition the same way. For each run it holds how many
   items meet it, out of how many, as a percentage, and the ids of the ones
   that meet it. Use it for "what percentage", "what share" or "how many out
@@ -182,6 +174,23 @@ itself.
   ["2026-08-21"]. It covers only the runs loaded here, not when anything
   began: the age or lifetime of the route, site or equipment is not in it.
 
+THE RECORDS THEMSELVES
+"records" is not a figure: it is what each run wrote down, as written. Name it
+when the question asks for a detail a run recorded:
+- the run itself: its facility, run status, final result, start and end
+  time, duration, and the counts the robot reported for itself
+- what happened at a checkpoint: whether it was completed or missed and why
+  (its missed reason), its result, what was observed, the operator notes
+- the findings: what was found, where, how severe, their status (logged,
+  needs review, abstained) and the recommended action recorded with each
+- the sensor alerts logged during the run, and the run's event log
+It works nothing out: it has no counts, averages, maxima or comparisons of its
+own. So when the question asks for a figure, name the figure above that holds
+it, never records. When it asks how many, an average, the highest or a
+comparison and no figure above holds it, abstain; records will not work it
+out. A question can need both, e.g. a count and the notes of the checkpoints
+it counts: name both.
+
 Questions use everyday words for readings. Match them to the sensor block in
 the names above:
 - vibration or shaking is the accelerometer (the ADXL345 sensor)
@@ -190,9 +199,8 @@ the names above:
 - particulate, particles, dust, air quality, PM2.5 or PM10 is particulate (the
   SPS30 sensor)
 So "average vibration per zone" is the mean of accelerometer.vibration_rms_g.
-Use a share for "what percentage" or "what share", and a count for "how many"
-or "which". Readings that could not be trusted were left out of all of these
-and the answer will say so; that is not a reason to abstain.
+Readings that could not be trusted were left out of all of these figures, and
+the answer will say so; that is not a reason to abstain.
 
 Zones in the records, and the checkpoints in each (zone: checkpoints):
 {layout}
@@ -207,11 +215,12 @@ Reply with JSON only, one of:
 
 {places}
 derivations: the names, from the list above, of the figures the question
-  needs. At least one; more only if the question asks about more
-  than one thing ("how many passed and how many failed").
+  needs, or records for what the runs wrote down. At least one; more only if
+  the question asks about more than one thing ("the highest and the average
+  temperature in each zone" names a maximum and a mean).
 
 WHEN TO ABSTAIN
-Abstain if no figure above answers the question:
+Abstain if no figure above and not the records answer the question:
 -the model should abstain on how/why questions like "Why did the temperature reduce/peak" or
  "Who is the manufacturer of the robot". Basically questions which the data will not contain.
 
@@ -291,8 +300,7 @@ def reply_schema(derivation: DerivationConfig) -> dict:
             ]},
             "zones": {"type": "array", "items": {"type": "string"}},
             "checkpoints": {"type": "array", "items": {"type": "string"}},
-            # "derivations": {"type": "array", "items": {"type": "string", "enum": [*offered(derivation), RECORDS]}},
-            "derivations": {"type": "array", "items": {"type": "string", "enum": [*offered(derivation)]}},
+            "derivations": {"type": "array", "items": {"type": "string", "enum": [*offered(derivation), RECORDS]}},
         },
         "required": ["intent", "runs", "zones", "checkpoints", "derivations"],
         "additionalProperties": False,
@@ -349,6 +357,13 @@ def describe(name: str, derivation: DerivationConfig) -> str:
         zone = ", and the checkpoints in each zone" if entry["group_by"] == "zone" else ""
         return (f"- {name}: maximum. In each run, the highest {entry['field_path']} over its {entry['source']}, "
                 f"per {entry['group_by']}, and which reading it was and when{zone}")
+    if entry["type"] == "condition_count" and "by_value" in entry:
+        items = entry["scope"].replace("_", " ")
+        expected = ", ".join(entry.get("expected") or [])
+        return (f"- {name}: count by value. In each run, how many {items} have each value of "
+                f"{entry['by_value']} ({expected}, each listed even at 0, and any other value found), out of "
+                f"how many {items}, and which were left out and why. For \"how many {items} by "
+                f"{entry['by_value']}\", a breakdown, or how many have one {entry['by_value']}")
     if entry["type"] in ("condition_count", "proportion"):
         condition = derivation.conditions[entry["condition"]]
         items = entry["scope"].replace("_", " ")
@@ -368,8 +383,7 @@ def describe(name: str, derivation: DerivationConfig) -> str:
 
 
 def build_prompt(question: str, feedback: str, records: Sequence[Record], derivation: DerivationConfig) -> str:
-    # lines = [describe(name, derivation) for name in [*offered(derivation), RECORDS]]
-    lines = [describe(name, derivation) for name in [*offered(derivation)]]
+    lines = [describe(name, derivation) for name in [*offered(derivation), RECORDS]]
     values = {
         "derivations": "\n".join(lines) or "(none)",
         "layout": layout(records) or "(none)",
@@ -405,8 +419,7 @@ def parse_reply(reply: str, records: Sequence[Record], derivation: DerivationCon
     checkpoints, zones = plan["checkpoints"], plan["zones"]
 
     names = plan["derivations"]
-    # allowed = [*offered(derivation), RECORDS]
-    allowed = [*offered(derivation)]
+    allowed = [*offered(derivation), RECORDS]
     if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
         raise RouteError("derivations must be a list of derivation names")
     bad = [n for n in names if n not in allowed]

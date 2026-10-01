@@ -32,7 +32,7 @@ questions:
 
   - id: Q01
     category: retrieval
-    question: "When was checkpoint_3 last inspected, and what did that inspection record?"
+    question: " a3_front inspection on the most recent run"
     must_abstain: false
     requires_derivations: []
     reads: [checkpoints.checkpoint_id, checkpoints.timestamp, checkpoints.observed,
@@ -52,7 +52,7 @@ questions:
 
   - id: Q02
     category: retrieval
-    question: "Show me the evidence captured at checkpoint_2 on the most recent run."
+    question: "Show me the evidence captured at ac_2 on the most recent run."
     must_abstain: false
     requires_derivations: []
     reads: [checkpoints.evidence_images, checkpoints.checkpoint_id]
@@ -215,7 +215,7 @@ questions:
 
   - id: Q11
     category: coverage
-    question: "What was missed on the most recent run, and why?"
+    question: "What checkpoint was missed on the most recent run and why?"
     must_abstain: false
     requires_derivations: []
     reads: [checkpoints.status, checkpoints.missed_reason]
@@ -233,7 +233,7 @@ questions:
 
   - id: Q12
     category: coverage
-    question: "Have any checkpoints been missed on more than one run?"
+    question: "Have any checkpoints been missed on the first run?"
     must_abstain: false
     requires_derivations: []
     reads: [checkpoints.status, checkpoints.checkpoint_id, run_id]
@@ -247,7 +247,7 @@ questions:
 
   - id: Q13
     category: coverage
-    question: "Which sensor blocks were unavailable on the most recent run, and why?"
+    question: "Which sensor blocks were unavailable on the most recent run and why?"
     must_abstain: false
     requires_derivations: []
     reads: [checkpoints.sensor.raw.adxl345_ok, checkpoints.sensor.raw.bme680_ok,
@@ -272,7 +272,7 @@ questions:
 
   - id: Q14
     category: status
-    question: "Are there any findings marked abstained, and where?"
+    question: "Are there any findings marked abstained along with where?"
     must_abstain: false
     requires_derivations: []
     reads: [findings.status, findings.finding_id, findings.checkpoint_id, findings.severity]
@@ -307,7 +307,7 @@ questions:
 
   - id: Q16
     category: status
-    question: "How many runs have been recorded, and over what period?"
+    question: "How many runs have been recorded, over what period?"
     must_abstain: false
     requires_derivations: [run_date_range]
     reads: [derived.values.run_span]

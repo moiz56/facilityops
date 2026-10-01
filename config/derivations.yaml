@@ -61,6 +61,18 @@ derivations:
     type: condition_count
     scope: checkpoints             # checkpoints, findings or sensor_alerts
     condition: result_status_is_fail   # a name from `conditions` above
+  # D2 by value: instead of one condition, count every value of one field.
+  #   by_value: a field of the scope's items (as a condition's `field`)
+  #   expected: values always listed, with 0 when none has it; any other value
+  #             found is listed too, verbatim, never folded into one of these
+  # Output: by_value, one entry per value ({value, count, expected}), plus
+  # population, inputs_excluded and excluded_items as above. No count or
+  # matching_ids: there is no single condition.
+  condition_count_finding_status:
+    type: condition_count
+    scope: findings
+    by_value: status
+    expected: [logged, needs_review, abstained]
   # D3: share of the items of `scope` in each run for which the
   # named condition holds. numerator = matching items, denominator = eligible items.
   proportion:

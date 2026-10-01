@@ -10,7 +10,13 @@ from common.schema import Record
 from agents.schema import (
     DerivationConfig, DerivedValues, Eligibility, EligibleValue, Exclusion, ExtendedRecord,
 )
-from agents.utils import *
+from agents.utils import (
+    RECORD_SCOPES, UnknownDerivationError, add_zone_checkpoints, by_time, checkpoint_problem, count_by_value,
+    empty_group,
+    entry_inputs, excluded_entries, field_problem, for_run, format_date, format_timestamp, format_value,
+    group_inputs, grouped_result, item_id, lookup, match_condition, no_inputs_reason, not_computable, param,
+    read_path, round_value, sensor_field_paths, source_kind, stale_entries,
+)
 
 
 # Extended record
@@ -268,7 +274,26 @@ def condition_count(
     checkpoint_id (None for findings and sensor alerts, which eligibility does
     not name), reason is eligibility's own, and count how many items it covers
     (a checkpoint visited twice can be 2). The counts sum to inputs_excluded.
+
+    With `by_value` set instead of a condition, it counts every value of that
+    field (count_by_value): the output has field and by_value in place of
+    condition, count and matching_ids.
     """
+    if "by_value" in params:
+        population, by_value, exclusions = count_by_value(record, params, eligibility, "condition_count")
+        return {
+            "derivation": "condition_count",
+            "status": "OK",
+            "scope": params["scope"],
+            "field": params["by_value"],
+            "by_value": by_value,
+            "population": population,
+            "inputs_excluded": sum(e.count for e in exclusions),
+            "excluded_items": [
+                {"item_id": e.scope, "reason": e.reason, "count": e.count} for e in exclusions
+            ],
+        }
+
     population, matching_ids, exclusions = match_condition(
         record, params, eligibility, config, "condition_count",
     )

@@ -228,15 +228,17 @@ CREATE TABLE d1_checkpoints (
 
 D2 = """
 -- D2 condition_count: one row per instance and run: how many items of scope
--- meet the instance's named condition (e.g. result_status_is_fail).
+-- meet the instance's named condition (e.g. result_status_is_fail). A count
+-- by value (field set, condition NULL) keeps its per-value counts in d2_by_value.
 CREATE TABLE d2_condition_count (
     instance        TEXT NOT NULL,                       -- its name in derivations.yaml
     run_id          TEXT NOT NULL REFERENCES runs,
     status          TEXT NOT NULL,                       -- OK or NOT_COMPUTABLE
     reason          TEXT,                                -- why, when NOT_COMPUTABLE
     scope           TEXT,                                -- checkpoints, findings or sensor_alerts
-    condition       TEXT,                                -- the condition's name in derivations.yaml
-    count           INTEGER,                             -- items that meet the condition
+    condition       TEXT,                                -- the condition's name in derivations.yaml; NULL for a count by value
+    field           TEXT,                                -- the field counted by value (e.g. status); NULL for a condition count
+    count           INTEGER,                             -- items that meet the condition; NULL for a count by value
     population      INTEGER,                             -- items it could be checked on, after exclusions
     inputs_excluded INTEGER,                             -- items the exclusion rule left out
     path            TEXT NOT NULL,                       -- derived.values.<instance>[i]
@@ -252,6 +254,21 @@ CREATE TABLE d2_matching_ids (
     position        INTEGER NOT NULL,                    -- order in matching_ids, 0 = first
     path            TEXT NOT NULL,                       -- derived.values.<instance>[i].matching_ids[position]
     path_record     TEXT NOT NULL,                       -- records[i].<scope>[j]: the first item with this id
+    PRIMARY KEY (instance, run_id, position),
+    FOREIGN KEY (instance, run_id) REFERENCES d2_condition_count
+);
+
+-- D2 by value: for a count by value, one row per value of its field in a run:
+-- the expected values first (each listed, 0 when no item has it), then any
+-- other value found, verbatim. The counts add up to population.
+CREATE TABLE d2_by_value (
+    instance        TEXT NOT NULL,
+    run_id          TEXT NOT NULL REFERENCES runs,
+    value           TEXT NOT NULL,                       -- the field's value, as recorded, e.g. needs_review
+    count           INTEGER NOT NULL,                    -- items with that value; 0 is a real count
+    expected        INTEGER NOT NULL,                    -- 1: listed under expected in derivations.yaml; 0: found only
+    position        INTEGER NOT NULL,                    -- order in by_value, 0 = first
+    path            TEXT NOT NULL,                       -- derived.values.<instance>[i].by_value[position]
     PRIMARY KEY (instance, run_id, position),
     FOREIGN KEY (instance, run_id) REFERENCES d2_condition_count
 );
@@ -741,7 +758,8 @@ def add_d1(conn: sqlite3.Connection, records: Sequence[Record], values: dict) ->
 
 
 def add_d2(conn: sqlite3.Connection, records: Sequence[Record], values: dict, config: DerivationConfig) -> None:
-    """d2_condition_count: one row per run; d2_matching_ids and d2_excluded_items: one per item.
+    """d2_condition_count: one row per run; d2_matching_ids, d2_by_value and
+    d2_excluded_items: one per item, value or exclusion.
 
     An item's path_record is the first item in the run's scope with that id.
     """
@@ -749,10 +767,21 @@ def add_d2(conn: sqlite3.Connection, records: Sequence[Record], values: dict, co
     for instance, outputs in instances(values, "condition_count"):
         for k, out in enumerate(outputs):
             path = f"derived.values.{instance}[{k}]"
-            row = stored(out, "matching_ids", "excluded_items")
+            row = stored(out, "matching_ids", "by_value", "excluded_items")
             insert(conn, "d2_condition_count", {"instance": instance, "path": path, **row})
+            for position, entry in enumerate(out.get("by_value", [])):
+                insert(conn, "d2_by_value", {
+                    "instance": instance, "run_id": out["run_id"], "value": str(entry["value"]),
+                    "count": entry["count"], "expected": int(entry["expected"]), "position": position,
+                    "path": f"{path}.by_value[{position}]",
+                })
+            for position, item in enumerate(out.get("excluded_items", [])):
+                insert(conn, "d2_excluded_items", {
+                    "instance": instance, "run_id": out["run_id"], **item, "position": position,
+                    "path": f"{path}.excluded_items[{position}]",
+                })
             if "matching_ids" not in out:
-                continue   # NOT_COMPUTABLE
+                continue   # NOT_COMPUTABLE, or a count by value
             i = index[out["run_id"]]
             scope = out["scope"]
             first = first_items(records[i], scope, config)
@@ -761,11 +790,6 @@ def add_d2(conn: sqlite3.Connection, records: Sequence[Record], values: dict, co
                     "instance": instance, "run_id": out["run_id"], "item_id": mid, "position": position,
                     "path": f"{path}.matching_ids[{position}]",
                     "path_record": f"records[{i}].{scope}[{first[mid]}]",
-                })
-            for position, item in enumerate(out["excluded_items"]):
-                insert(conn, "d2_excluded_items", {
-                    "instance": instance, "run_id": out["run_id"], **item, "position": position,
-                    "path": f"{path}.excluded_items[{position}]",
                 })
 
 

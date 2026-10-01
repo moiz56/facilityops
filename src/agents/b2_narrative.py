@@ -175,40 +175,27 @@ def run_summary(record: Record, report: dict, derivations: dict, agents: dict) -
 
 
 def run_section_intros(record: Record, report: dict, derivations: dict, agents: dict) -> tuple[ExtendedRecord, dict | None]:
-    """B-2's section introductions for one run: (extended record, zone -> envelope).
-
-    None in place of the envelopes when B-2 is disabled in agents.yaml.
-    """
+    """B-2's section introductions for one run: (extended record, zone -> envelope, or None when disabled)."""
     extended, config, verification, b2 = prepare(record, report, derivations, agents)
-    if not b2.enabled:
-        return extended, None
-    return extended, section_intros(extended, 0, b2, config, verification)
+    return extended, section_intros(extended, 0, b2, config, verification) if b2.enabled else None
+
+
+def run_item_notes(record: Record, report: dict, derivations: dict, agents: dict) -> tuple[ExtendedRecord, list | None]:
+    """B-2's item notes for one run: (extended record, one envelope per checkpoint, or None when disabled)."""
+    extended, config, verification, b2 = prepare(record, report, derivations, agents)
+    return extended, item_notes(extended, 0, b2, config, verification) if b2.enabled else None
 
 
 def run_coverage(
     record: Record, report: dict, derivations: dict, agents: dict, evidence_root: Path | None = None,
 ) -> tuple[ExtendedRecord, dict | None]:
-    """B-2's coverage statement for one run: (extended record, envelope).
+    """B-2's coverage statement for one run: (extended record, envelope, or None when disabled).
 
     evidence_root is where evidence paths resolve (common.paths, as the report
     resolves them); without it the statement gives images referenced only.
-    None in place of the envelope when B-2 is disabled in agents.yaml.
     """
     extended, config, verification, b2 = prepare(record, report, derivations, agents, evidence_root)
-    if not b2.enabled:
-        return extended, None
-    return extended, coverage(extended, 0, b2, config, verification)
-
-
-def run_item_notes(record: Record, report: dict, derivations: dict, agents: dict) -> tuple[ExtendedRecord, list | None]:
-    """B-2's item notes for one run: (extended record, one envelope per checkpoint, record order).
-
-    None in place of the envelopes when B-2 is disabled in agents.yaml.
-    """
-    extended, config, verification, b2 = prepare(record, report, derivations, agents)
-    if not b2.enabled:
-        return extended, None
-    return extended, item_notes(extended, 0, b2, config, verification)
+    return extended, coverage(extended, 0, b2, config, verification) if b2.enabled else None
 
 
 def executive_summary(
@@ -222,7 +209,6 @@ def executive_summary(
     DEGRADED_TEMPLATE_ONLY. With prose off there is no model call: OK,
     method deterministic.
     """
-    extended = with_run_values(extended, run_index, derivation)
     record = extended.records[run_index]
     w = Writer(extended, "executive_summary.j2")
     paragraphs = summary_paragraphs(w, record, run_index, extended, derivation)
@@ -368,7 +354,6 @@ def coverage(
     availability (devices off, readings excluded), and the record's own
     contradictions, every declared count beside its computed one.
     """
-    extended = with_run_values(extended, run_index, derivation)
     record = extended.records[run_index]
     r = f"records[{run_index}]"
     v = f"derived.run_values.{record.run_id}"
@@ -525,7 +510,6 @@ def section_intros(
     among the zones where that mean could be computed. A zone with no samples
     gets the first sentence only. No model call.
     """
-    extended = with_run_values(extended, run_index, derivation)
     record = extended.records[run_index]
     v = f"derived.run_values.{record.run_id}"
     values = extended.derived.run_values[record.run_id]
@@ -572,7 +556,6 @@ def item_notes(
     print); normal (what was observed and photographed), followed by "No
     findings recorded for this checkpoint." when there are none. No model call.
     """
-    extended = with_run_values(extended, run_index, derivation)
     record = extended.records[run_index]
     r = f"records[{run_index}]"
     v = f"derived.run_values.{record.run_id}"
@@ -707,13 +690,6 @@ def add_run_values(
     return replace(extended, derived=replace(extended.derived, run_values=run_values))
 
 
-def with_run_values(extended: ExtendedRecord, run_index: int, config: DerivationConfig) -> ExtendedRecord:
-    """extended as given if records[run_index] already has its run values, else with them added."""
-    if extended.records[run_index].run_id in extended.derived.run_values:
-        return extended
-    return add_run_values(extended, run_index, config, compute_eligibility(extended.records, config))
-
-
 def zones_for(record: Record, config: DerivationConfig, values: dict, eligibility: Eligibility) -> tuple[dict, dict]:
     """Per zone of the route (route order), and per samples-based group_mean instance.
 
@@ -759,11 +735,6 @@ def run_values_for(record: Record, config: DerivationConfig) -> dict:
     alerts.update(a.severity for a in record.sensor_alerts)
 
     reached = [cp for cp in checkpoints if cp.status != MISSED]
-    no_evidence = [cp.checkpoint_id for cp in checkpoints if not has_evidence(cp)]
-    thermal = {"full": [], "partial": [], "none": []}
-    for cp in checkpoints:
-        if has_evidence(cp):
-            thermal[thermal_coverage(cp)].append(cp.checkpoint_id)
 
     return {
         "computed": {
@@ -778,14 +749,10 @@ def run_values_for(record: Record, config: DerivationConfig) -> dict:
         },
         "alerts": {"total": len(record.sensor_alerts), **dict(sorted(alerts.items()))},
         "offline": offline_blocks(record, config),
-        "findings_by_checkpoint": dict(Counter(f.checkpoint_id for f in record.findings)),
         "evidence": {
             "images_referenced": sum(len(cp.evidence_images) for cp in checkpoints),
             "reached": len(reached),                                        # checkpoints not MISSED
             "with_evidence": sum(1 for cp in reached if has_evidence(cp)),   # of those, how many captured evidence
-            "no_evidence_ids": no_evidence,
-            **{f"thermal_{kind}": len(ids) for kind, ids in thermal.items()},
-            **{f"thermal_{kind}_ids": ids for kind, ids in thermal.items()},
         },
         "formatted": {
             "run_date": format_date(record.start_time, config) if record.start_time else None,
@@ -880,14 +847,6 @@ def views(checkpoint: Checkpoint) -> tuple[set, set]:
         view, is_thermal = parse_filename(uri, checkpoint.checkpoint_id)
         (thermal if is_thermal else rgb).add((view or "").casefold())
     return rgb, thermal
-
-
-def thermal_coverage(checkpoint: Checkpoint) -> str:
-    """full: every view with an RGB image has a thermal one; none: no thermal at all."""
-    rgb, thermal = views(checkpoint)
-    if not thermal:
-        return "none"
-    return "full" if rgb <= thermal else "partial"
 
 
 def offline_blocks(record: Record, config: DerivationConfig) -> dict:

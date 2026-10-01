@@ -1,72 +1,53 @@
-"""For each question in config/b1_question_set.yaml, print what the first
-router (retrieval: derivation, lookup or abstain) output, then what the
-second router (derivation or lookup, whichever the first picked) output.
+"""The B-1 question set as a test suite: every question in config/b1_question_set.yaml.
 
-    PYTHONPATH=src python stub.py                 # the 20 canonical questions
-    PYTHONPATH=src python stub.py --paraphrases   # and every paraphrase
+Each question is answered end to end, as `python -m agents.main --ask` does
+(retrieval router, router, SQL writer, prose writer, verification), and its
+answer PDF and trace are written to tests/output/b1/question_set/ before the
+check, so a failing case can still be read.
+
+A question with must_abstain: true passes when the answer is "the records do
+not contain this" (ABSTAINED). Every other question passes when it is
+answered: OK, or DEGRADED_TEMPLATE_ONLY (the facts verified and shown, only
+the model's lead-in sentence missing). It calls the real model, so it needs
+the API key in .env.
+
+    PYTHONPATH=src pytest stub.py -v                       # the 20 canonical questions (TB-04)
+    PYTHONPATH=src pytest stub.py -v -k Q07                # one question
+    B1_PARAPHRASES=1 PYTHONPATH=src pytest stub.py -v      # and every paraphrase
+
+The paraphrases are development fixtures, not part of TB-04: they check that
+routing does not depend on the canonical wording.
 """
 
-import argparse
-import json
-import sys
-from dataclasses import asdict
+import os
 
-from agents.b1_analytical_router_derived import RouteError, route_question
-from agents.b1_analytical_router_lookup import route_lookup
-from agents.b1_retrieval_router import RetrievalError, classify_question
-from agents.data_agent import load_corpus
-from agents.provider import ProviderError, make_provider
-from agents.utils import b1_config, derivation_config, hash_configs, load_env, provider_config
+import pytest
+
 from common import PROJECT_ROOT
-from common.paths import load_config, setting
+from common.paths import load_config
+from tests.b1_derivations.conftest import ask  # noqa: F401  (the shared fixture: answers, writes PDF and trace)
 
 QUESTION_SET = PROJECT_ROOT / "config" / "b1_question_set.yaml"
+ANSWERED = ("OK", "DEGRADED_TEMPLATE_ONLY")
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--paraphrases", action="store_true", help="also run every paraphrase")
-    args = parser.parse_args()
-
-    load_env(PROJECT_ROOT / ".env")
-    paths = load_config(PROJECT_ROOT / "config" / "agent_path.yaml")
-    report = load_config(PROJECT_ROOT / "config" / "report.yaml")
-    derivations = load_config(PROJECT_ROOT / "config" / "derivations.yaml")
-    agents = load_config(PROJECT_ROOT / "config" / "agents.yaml")
-    config = derivation_config(report, derivations, hash_configs(report, derivations))
-    b1 = b1_config(agents)
-    provider = make_provider(provider_config(agents))
-    records = load_corpus(PROJECT_ROOT / setting(paths, "agent", "data_dir"), setting(paths, "agent", "record_patterns"))
-
-    cases = []
+def cases() -> list:
+    """(id, question, must_abstain) for every canonical question, and its paraphrases when asked for."""
+    found = []
     for q in load_config(QUESTION_SET)["questions"]:
-        cases.append((q["id"], q["question"]))
-        if args.paraphrases:
-            cases += [(f"{q['id']}p{n}", p) for n, p in enumerate(q.get("paraphrases") or [], 1)]
-
-    for case_id, question in cases:
-        print(f"\n=== {case_id}: {question}")
-        try:
-            retrieval = classify_question(question, provider, b1, config)
-        except (ProviderError, RetrievalError) as error:
-            print(f"first router: ERROR {error}")
-            continue
-        print(f"first router:  {json.dumps(asdict(retrieval))}")
-
-        if retrieval.kind == "abstain":
-            print("second router: (not run)")
-            continue
-        try:
-            if retrieval.kind == "derivation":
-                route = route_question(question, records, provider, b1, config)
-            else:
-                route = route_lookup(question, records, provider, b1)
-        except (ProviderError, RouteError) as error:
-            print(f"second router: ERROR {error}")
-            continue
-        print(f"second router ({retrieval.kind}): {json.dumps(asdict(route))}")
-    return 0
+        found.append(pytest.param(q["question"], q["must_abstain"], id=q["id"]))
+        if os.environ.get("B1_PARAPHRASES"):
+            found += [
+                pytest.param(p, q["must_abstain"], id=f"{q['id']}p{n}")
+                for n, p in enumerate(q.get("paraphrases") or [], 1)
+            ]
+    return found
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+@pytest.mark.parametrize("question, must_abstain", cases())
+def test_question_set(ask, question, must_abstain):
+    status = ask(question, "question_set")
+    if must_abstain:
+        assert status == "ABSTAINED", f"must abstain, got {status}"
+    else:
+        assert status in ANSWERED, f"must be answered, got {status}"
