@@ -1,0 +1,261 @@
+B-1 ANALYTICAL AGENT - PROMPT GUIDELINES (PROTOTYPE)
+====================================================
+
+How to word a question so the agent can answer it, and what it can answer.
+The agent abstains when it cannot work out what is being asked, so a
+specific question gets an answer and a vague one gets an abstention.
+
+Run a question with:
+  source venv/bin/activate
+  PYTHONPATH=src python -m agents.main --data-dir<path-to-data> --ask "<question>"
+
+Needs ANTHROPIC_API_KEY in .env, matching the provider
+in config/agents.yaml.
+
+
+1. THE THREE PARTS OF A GOOD QUESTION
+-------------------------------------
+
+Every question should name three things:
+
+  1. The run         which run or runs it is about
+  2. The figure      the derivation or retrieval being asked for
+  3. The item        what it looks over: checkpoint, zone, finding, sensor
+                     alert, or the run itself
+
+Example:
+
+  "In the most recent run, which checkpoints had a temperature threshold
+   that was exceeded?"
+
+  1. The run      "In the most recent run"
+  2. The figure   "temperature threshold ... exceeded" -> D1 threshold comparison
+  3. The item     "checkpoints"
+
+Using the derivation's own name in the question ("threshold", "mean",
+"peak", "top five", "percentage") works best. Paraphrasing works too, as
+long as it is not vague: "went over the temperature limit" is fine,
+"was it too hot" is not.
+
+
+2. NAMING THE RUN
+-----------------
+
+These all work:
+
+  Across all runs          "across all runs", "in each run", or name no run
+  First run                "the first run", "the very first run"
+  Second, third, ...       "the second run", "the first and third runs"
+  Most recent run          "the latest run", "the most recent run"
+  The one before it        "the run before the latest", "the last two runs"
+  One day                  "the runs on August 31st", "on 19/8/2026"
+  A span of days           "the runs from 14 to 21 August 2026",
+                           "the runs in August 2026"
+
+Notes:
+- Naming no run means every run. Say "the latest run" if that is what you mean.
+- A date names every run that started that day; there may be more than one.
+- Dates written with slashes are day first: 3/4/2026 is 3 April.
+- If you leave out the month or year, the agent takes it from the days the
+  runs were taken on.
+- A date with no run on it gets an abstention, not an empty answer.
+
+
+3. NAMING THE ITEM
+------------------
+
+  checkpoint    one stop on the route, e.g. a3_back
+  zone          an area of the route holding one or more checkpoints,
+                e.g. rowA_back
+  finding       something the run found at a checkpoint
+  sensor alert  a threshold breach logged during the run
+  run           the run's own details: status, result, times, duration
+
+- Names can be written loosely: "row A back" finds rowA_back.
+- A zone and a checkpoint can share a name. Say "at <name>" for the
+  checkpoint and "in the <name> zone" for the zone.
+- A zone or checkpoint that is not in the records gets an abstention.
+
+
+4. ONE THING PER QUESTION - AVOID "AND"
+---------------------------------------
+
+Ask for one thing at a time. The data is fetched with SQL, and a question
+joined with "and" makes the agent fetch from several tables and join them
+when it does not need to. That makes the answer slower and more likely to
+go wrong.
+
+  Avoid:   "What was a3_back's status and its temperature in the latest run?"
+  Better:  "Was a3_back completed in the latest run?"
+           "What was the temperature at a3_back in the latest run?"
+
+  Avoid:   "Which checkpoints failed and which were missed in the latest run?"
+  Better:  "Which checkpoints failed in the latest run?"
+           "Which checkpoints were missed in the latest run?"
+
+
+5. WHAT THE AGENT CAN ANSWER
+----------------------------
+
+The agent first decides which kind of retrieval a question needs:
+
+  derivation  a figure worked out over the runs (a count, share, mean,
+              maximum, ranking, threshold comparison, route change or dates),
+              or a detail the runs recorded (findings, alerts, events,
+              the run's details, missed reasons, notes)
+  lookup      a value exactly as recorded, for a named run, zone or
+              checkpoint: a reading, a status, a zone, an image
+  abstain     neither can answer it
+
+5.1 DERIVATIONS
+---------------
+Set in config/derivations.yaml. The settings below are the current ones; if
+that file changes, so does what can be asked.
+
+D1  Threshold comparison
+    Checks every checkpoint's temperature (environment.temperature_c)
+    against a limit of 30 °C. Per run: which checkpoints are over, how many
+    are and are not, and by how much each is over or under.
+    Ask with: "threshold", "limit", "exceeded", "went over", "stayed under",
+              "by how much"
+      "Which checkpoints exceeded the temperature threshold in the latest run?"
+      "By how much did each checkpoint go over the limit in the first run?"
+    Not held: any other reading or limit.
+
+D2  Condition count
+    Counts checkpoints whose result_status is FAIL. Per run: how many, which
+    ones, out of how many, and which were left out of the count and why
+    (e.g. a missed checkpoint).
+    Ask with: "how many failed", "which failed", "failure count"
+      "How many checkpoints failed in the latest run?"
+      "Which checkpoints were left out of the failure count in the latest run?"
+    Not held: checkpoints that did not fail ("passed" is another value).
+
+D2  Count by value (findings by status)
+    Counts findings by status: logged, needs_review, abstained (each listed
+    even at 0, plus any other status found).
+    Ask with: "how many findings by status", "breakdown of findings"
+      "Give a breakdown of findings by status in the latest run."
+
+D3  Proportion
+    Share of checkpoints with status COMPLETED. Per run: how many, out of
+    how many, as a percentage, and which ones.
+    Ask with: "percentage", "share", "completion rate", "out of how many"
+      "What percentage of checkpoints were completed in the latest run?"
+    Not held: a failure rate, or any other share.
+
+D4  Mean per zone
+    Mean of a reading per zone, over the readings taken at the checkpoints.
+    Held for: vibration (accelerometer.vibration_rms_g),
+              temperature (environment.temperature_c),
+              PM2.5 (particulate.pm2_5)
+    A question about one checkpoint gets the mean of the zone it is in.
+    Ask with: "mean", "average"
+      "What was the mean vibration per zone in the latest run?"
+      "Mean temperature in rowA_back in the latest run?"
+    Not held: a mean for the whole run, humidity or any other field.
+
+D5  Maximum per zone
+    Highest reading per zone, the checkpoint it came from and when.
+    Held for: vibration, temperature, PM2.5 (as D4)
+    Ask with: "highest", "peak", "maximum", "where was it highest"
+      "Which zone had the highest peak temperature in the latest run?"
+      "Peak vibration in rowA_back in the latest run?"
+    Not held: the lowest reading.
+
+D6  Top readings
+    The 5 highest readings in each run across all checkpoints, highest
+    first, with the checkpoint each came from.
+    Held for: vibration, temperature, PM2.5 (as D4)
+    Ask with: "top five", "highest readings", "where did <checkpoint> rank"
+      "What were the five highest vibration readings in the latest run?"
+    Not held: more than 5, the lowest, or a ranking within one zone.
+
+D7  Route change
+    Compares the latest run with the one before it: checkpoints only in the
+    earlier run, only in the latest, and in both, with counts.
+    Ask with: "did the route change", "new checkpoints", "removed"
+      "Which checkpoints are new in the latest run?"
+    Not held: any other pair of runs, or whether a change is better or worse.
+
+D8  Dates of the runs
+    Across all runs: earliest and latest start, the days between, each day a
+    run was taken on with its weekday, and when each run started.
+    Ask with: "when", "which days", "over what period", "weekend"
+      "Over what period were the runs taken?"
+      "Which runs were taken on 19/8/2026, and at what time?"
+    Not held: gaps between runs, runs per week.
+
+5.2 RECORDS (details the runs wrote down)
+-----------------------------------------
+Not a figure: the run's own records, as written. Nothing is counted or
+averaged here.
+  - the run itself: facility, run status, final result, start and end time,
+    duration, the counts the robot reported for itself
+  - a checkpoint visit: completed or missed and why, result, what was
+    observed, operator notes
+  - findings: what, where, how severe, status, recommended action
+  - sensor alerts logged during the run
+  - the run's event log
+      "Which findings need review in the latest run?"
+      "Which checkpoints were missed in the latest run, and why?"
+      "What recommended action is recorded at a3_back in the latest run?"
+      "How did the latest run end?"
+
+5.3 LOOKUPS (values as recorded)
+--------------------------------
+One recorded value of a named item. Nothing is worked out.
+
+  checkpoints          status (COMPLETED / MISSED), verdict (PASS / FAIL /
+                       WARN), which zone a checkpoint is in, which
+                       checkpoints a zone holds, route order
+                         "Was a6_back completed in the latest run?"
+                         "Which zone is a3_back in?"
+  checkpoint_readings  every sensor reading at a checkpoint, or why one was
+                       left out (faulty or offline sensor, missed checkpoint)
+                         "What was the temperature at a3_back in the latest run?"
+                         "Why is there no PM2.5 reading at a3_back in the latest run?"
+  evidence             the images captured at a checkpoint (evidence,
+                       thermal, annotated, finding images)
+                         "Which images were taken at a3_back in the latest run?"
+  zones                the zones a run's route passed through, in order
+                         "Which zones did the route cover in the latest run?"
+
+Where the line falls between lookup and derivation:
+  "The temperature at a3_back"                 -> lookup (one recorded value)
+  "Did a3_back go over the temperature limit"  -> derivation (D1)
+  "The highest temperature in rowA_back"       -> derivation (D5)
+
+Sensor words the agent understands:
+  vibration, shaking                       -> accelerometer
+  temperature, heat, humidity, pressure    -> environment
+  particulate, dust, air quality, PM2.5    -> particulate
+
+
+6. WHEN THE AGENT ABSTAINS
+--------------------------
+
+The agent abstains rather than guess. Expect an abstention for:
+  - a date, run, zone or checkpoint the records do not hold
+  - a figure no derivation keeps: a failure rate, an overall mean, the
+    lowest reading, a ranking within a zone, gaps between runs, runs per week
+  - items that did not meet a condition ("which did not fail")
+  - comparing runs other than the last two
+  - why something happened, or what will happen
+  - a judgement: better, worse, safe, normal, acceptable
+  - anything the records do not hold: costs, maintenance, people, other sites
+
+If a question abstains and you think it should not, check it against the
+three parts in section 1 and the lists in section 5.
+
+
+7. CHECKLIST
+------------
+
+  [ ] Does it name the run? (latest, first, a date, all runs)
+  [ ] Does it name the figure or the value? (threshold, mean, peak, top
+      five, percentage, temperature at ...)
+  [ ] Does it name the item? (checkpoint, zone, finding, sensor alert, run)
+  [ ] Does it ask for one thing, with no "and"?
+  [ ] Is the figure one of D1-D8, a record, or a lookup above?
+

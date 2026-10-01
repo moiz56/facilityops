@@ -19,5 +19,6 @@ __pycache__/
 # API keys
 .env
 
+#ignore
 B1_LOOKUP_QUESTIONS.txt
 B1_QUESTIONS.txt
