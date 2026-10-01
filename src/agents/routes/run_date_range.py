@@ -8,7 +8,7 @@ and is checked against the router's runs. Nothing here calls the model or
 runs the query.
 """
 
-from agents.database import D8, RUNS
+from agents.database_derivation import D8, RUNS
 
 TYPE = "run_date_range"
 # False: d8_run_date_range and d8_days cover every run at once and have no
@@ -51,7 +51,7 @@ WHAT THE VALUES LOOK LIKE
   and the run's own UTC offset, e.g. '2026-08-05T18:55:46-0700'. Its day is
   its first ten characters, in that offset: never convert it.
 - A run_id begins with the day and time the run started, then the route's
-  name, e.g. '20260819_114053-sis_racks_checkpoint_route'. Read the day from
+  name: '<YYYYMMDD>_<HHMMSS>-<route name>'. Read the day from
   the tables, not from the run_id.
 - Several runs can start on one day; many days in the span have none.
 

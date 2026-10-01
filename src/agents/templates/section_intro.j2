@@ -1,18 +1,17 @@
-{#- B-2 section introduction: one or two sentences opening a zone's section.
-    Arguments are slot placeholders or lists of them. -#}
+{#- B-2 section introduction: one per zone (worked example, section 2).
+    Every argument that prints a value is a slot placeholder from
+    b2_narrative.Writer; code fills it. Arguments ending in _n are plain numbers
+    used only to choose wording, and are never printed. The literal text holds
+    no digits and no number words. A line starting "- " is a bullet. -#}
 
-{% macro intro(zone, checkpoints) -%}
-Zone {{ zone }} covers {{ checkpoints | join(", ") }}.
+{% macro intro(checkpoints, checkpoints_n, samples, samples_n) -%}
+This zone covers {{ checkpoints }} checkpoint{{ "" if checkpoints_n == 1 else "s" }} and {% if samples_n %}recorded {{ samples }} sample{{ "" if samples_n == 1 else "s" }} during the run.{% else %}was not sampled during the run.{% endif %}
 {%- endmacro %}
 
-{% macro mean(field, value) -%}
-{{ field }} {{ value }}
+{% macro mean(field, mean, usable, usable_n, excluded, excluded_n, rank, rank_n, ranked, joint, total) -%}
+- Mean {{ field }} here was {{ mean }}, across {{ usable }} usable sample{{ "" if usable_n == 1 else "s" }}{% if excluded_n %} ({{ excluded }} excluded){% endif %}{% if ranked %}; the {{ "joint " if joint else "" }}{% if rank_n == 1 %}highest{% else %}{{ rank }} highest{% endif %} of the {{ total }} zones where it could be computed{% endif %}.
 {%- endmacro %}
 
-{% macro not_computable(field) -%}
-{{ field }} not computable
-{%- endmacro %}
-
-{% macro means(items) -%}
-Telemetry means for the zone: {{ items | join("; ") }}.
+{% macro no_mean(field, excluded, excluded_n) -%}
+- No {{ field }} mean: none of the zone's samples were usable{% if excluded_n %} (all {{ excluded }} excluded){% endif %}.
 {%- endmacro %}

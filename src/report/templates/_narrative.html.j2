@@ -1,0 +1,18 @@
+{# B-2's prose, as render.summary_blocks splits it: ("p", [sentence]) or
+   ("ul", [items]). One macro, so every agent text prints the same way: its
+   sentences as paragraphs, and each run of bullets as a striped one-column
+   table in the document's table style, the sentence before it reading as its
+   caption. Autoescaped. #}
+{% macro blocks(items, list_class) -%}
+  {% for kind, lines in items %}
+    {% if kind == "ul" %}
+      <table class="data-table narrative-table {{ list_class }}">
+        <tbody>
+          {% for line in lines %}<tr><td>{{ line }}</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>{{ lines[0] }}</p>
+    {% endif %}
+  {% endfor %}
+{%- endmacro %}

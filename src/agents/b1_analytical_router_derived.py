@@ -35,12 +35,41 @@ RECORDS = "records"
 # The derivation types the router offers: every type with a SQL writer prompt.
 ROUTED_TYPES = tuple(kind for kind in PROMPTS if kind != RECORDS)
 
+# How the reply names runs, zones and checkpoints. Shared with the lookup
+# router (b1_analytical_router_lookup), so both read them the same way; code
+# checks them with resolve_runs and check_places.
+PLACES = """runs: which runs the question is about.
+- "all" if it does not name any.
+- Otherwise a list of positions, dates or both. Counting from the oldest, 1 is
+  the first run and 2 the second. Counting back from the newest, -1 is the
+  latest and -2 the one before it. "the first and third runs" is [1, 3], "the
+  latest run" is [-1], "the last two runs" is [-2, -1], "the first and the
+  latest" is [1, -1].
+- A date is written "YYYY-MM-DD" and names every run that started that day:
+  "the runs on 21/8/2026" is ["2026-08-21"]. Dates written with slashes are
+  day first, so 3/4/2026 is 3 April. A span of days is written "first/last":
+  "the runs from 1 to 10 August 2026" is ["2026-08-01/2026-08-10"], "the runs
+  in August 2026" is ["2026-08-01/2026-08-31"]. If the question leaves out the
+  month or year, take it from the days listed above.
+zones: the zones the question names, written as before a colon in the list
+  above. [] if it names none.
+checkpoints: the checkpoints the question names, written as after a colon in
+  the list above. [] if it names none.
+  The question may write a name loosely: with spaces for underscores, other
+  capitals, or words split or joined. Write it exactly as the list does.
+  Never put a zone in checkpoints or a checkpoint in zones. A name that is
+  both (a zone listed with one checkpoint of the same name) goes in
+  checkpoints when the question means the stop ("at <name>") and in zones
+  when it means the area ("in the <name> zone"). If a name matches nothing
+  in the list, copy it as written into the one the question means."""
+
 # Written by hand. build_prompt fills these placeholders:
 #   {derivations}  one line per routed instance, what it works out, from derivations.yaml
 #   {layout}       every zone in the records and the checkpoints in it, one line
 #                  each, so zones and checkpoints are not taken for each other
 #   {days}         every day a run started on, so a date given without its
 #                  month or year can be completed
+#   {places}       PLACES: how to name the runs, zones and checkpoints
 #   {question}     the user's question
 #   {feedback}     empty on the first call; why the previous reply was rejected after that
 # RECORDS is left out for now. To put it back, uncomment the RECORDS lines
@@ -71,10 +100,9 @@ completed and whether it passed, and takes sensor readings. Along the way it
 also logs findings and sensor alerts. Several runs are loaded, oldest first.
 
 The route is laid out in two levels: zones, and checkpoints inside them.
-- A zone is an area of the route, e.g. a row of racks (rowA_back).
-- A checkpoint is one stop in a zone, e.g. a single rack (a3_back). A zone
-  can hold several checkpoints, or just one; then the two often share a name
-  (checkpoint_1 is both a zone and its only checkpoint).
+- A zone is an area of the route.
+- A checkpoint is one stop in a zone. A zone can hold several checkpoints,
+  or just one; then the two often share a name.
 - Telemetry samples are logged every couple of seconds while the robot
   drives, each tagged with the zone it was in, not with a checkpoint.
 So a figure worked out per zone covers every reading in that zone. A question
@@ -132,7 +160,7 @@ itself.
 - A ranking lists the highest readings of one sensor field in each run,
   highest first, as many as its line says, each with its rank and the
   checkpoint or sample it came from. Use it for "the top 5", "the highest
-  readings", "which checkpoints had the highest" or "where did a3_back rank".
+  readings", "which checkpoints had the highest" or "where did <checkpoint> rank".
   It ranks the checkpoints of the whole run and holds no zones: the top
   readings within one zone are not in it. It never holds the lowest. A
   maximum and a ranking can both give the single highest reading;
@@ -177,29 +205,7 @@ Reply with JSON only, one of:
   {"intent": "answer", "runs": ..., "zones": [...], "checkpoints": [...], "derivations": [...]}
   {"intent": "abstain", "runs": "all", "zones": [], "checkpoints": [], "derivations": []}
 
-runs: which runs the question is about.
-- "all" if it does not name any.
-- Otherwise a list of positions, dates or both. Counting from the oldest, 1 is
-  the first run and 2 the second. Counting back from the newest, -1 is the
-  latest and -2 the one before it. "the first and third runs" is [1, 3], "the
-  latest run" is [-1], "the last two runs" is [-2, -1], "the first and the
-  latest" is [1, -1].
-- A date is written "YYYY-MM-DD" and names every run that started that day:
-  "the runs on 21/8/2026" is ["2026-08-21"]. Dates written with slashes are
-  day first, so 3/4/2026 is 3 April. A span of days is written "first/last":
-  "the runs from 1 to 10 August 2026" is ["2026-08-01/2026-08-10"], "the runs
-  in August 2026" is ["2026-08-01/2026-08-31"]. If the question leaves out the
-  month or year, take it from the days listed above.
-zones: the zones the question names, written as before a colon in the list
-  above. "row A back" is rowA_back. [] if it names none.
-checkpoints: the checkpoints the question names, written as after a colon in
-  the list above. "checkpoint 3" or "Checkpoint3" is checkpoint_3. [] if it
-  names none.
-  Never put a zone in checkpoints or a checkpoint in zones. A name that is
-  both (checkpoint_1: checkpoint_1) goes in checkpoints when the question
-  means the stop ("at checkpoint 1") and in zones when it means the area
-  ("in the checkpoint_1 zone"). If a name matches nothing in the list, copy
-  it as written into the one the question means.
+{places}
 derivations: the names, from the list above, of the figures the question
   needs. At least one; more only if the question asks about more
   than one thing ("how many passed and how many failed").
@@ -368,6 +374,7 @@ def build_prompt(question: str, feedback: str, records: Sequence[Record], deriva
         "derivations": "\n".join(lines) or "(none)",
         "layout": layout(records) or "(none)",
         "days": ", ".join(run_days(records)) or "(none)",
+        "places": PLACES,
         "question": question,
         "feedback": feedback,
     }
@@ -390,52 +397,12 @@ def parse_reply(reply: str, records: Sequence[Record], derivation: DerivationCon
     if set(plan) != {"intent", "runs", "zones", "checkpoints", "derivations"}:
         raise RouteError("an answer has exactly the keys intent, runs, zones, checkpoints and derivations")
 
-    runs = plan["runs"]
-    if runs == "all":
-        indices = list(range(len(records)))
-    else:
-        if not isinstance(runs, list) or not runs or not all((type(p) is int and p != 0) or isinstance(p, str) for p in runs):
-            raise RouteError('runs must be "all" or a list of non-zero whole numbers and dates')
-        # Two entries can name the same run.
-        chosen = set()
-        for p in runs:
-            if isinstance(p, int):
-                if not -len(records) <= p <= len(records):
-                    return Route(True, f"no run at position {p}; {len(records)} recorded", [], [], [], attempt)
-                # 1 is the oldest, -1 the most recent.
-                chosen.add(p - 1 if p > 0 else len(records) + p)
-                continue
-            # A day, or a span first/last, matched on the day the run started in its own offset.
-            first, _, last = p.partition("/")
-            try:
-                first, last = date.fromisoformat(first), date.fromisoformat(last or first)
-            except ValueError:
-                raise RouteError(f'{p} is not a date "YYYY-MM-DD" or a span "YYYY-MM-DD/YYYY-MM-DD"') from None
-            if first > last:
-                raise RouteError(f"{p} ends before it starts")
-            matched = [i for i, r in enumerate(records) if r.start_time and first <= r.start_time.date() <= last]
-            if not matched:
-                return Route(True, f"no run started on {p}", [], [], [], attempt)
-            chosen.update(matched)
-        indices = sorted(chosen)
-    run_ids = [records[i].run_id for i in indices]
-
-    checkpoints = plan["checkpoints"]
-    if not isinstance(checkpoints, list) or not all(isinstance(c, str) and c for c in checkpoints):
-        raise RouteError("checkpoints must be a list of checkpoint ids")
-    # Checked against every run: a checkpoint absent from the runs named is still a fair question.
-    known = set(known_checkpoints(records))
-    unknown = [c for c in checkpoints if c not in known]
-    if unknown:
-        return Route(True, f"{unknown[0]} is not in the records", [], [], [], attempt)
-
-    zones = plan["zones"]
-    if not isinstance(zones, list) or not all(isinstance(z, str) and z for z in zones):
-        raise RouteError("zones must be a list of zone names")
-    known = set(known_zones(records))
-    unknown = [z for z in zones if z not in known]
-    if unknown:
-        return Route(True, f"{unknown[0]} is not a zone in the records", [], [], [], attempt)
+    run_ids, reason = resolve_runs(plan["runs"], records)
+    if reason is None:
+        reason = check_places(plan["zones"], plan["checkpoints"], records)
+    if reason:
+        return Route(True, reason, [], [], [], attempt)
+    checkpoints, zones = plan["checkpoints"], plan["zones"]
 
     names = plan["derivations"]
     # allowed = [*offered(derivation), RECORDS]
@@ -452,3 +419,55 @@ def parse_reply(reply: str, records: Sequence[Record], derivation: DerivationCon
         False, None, run_ids, list(dict.fromkeys(checkpoints)), list(dict.fromkeys(names)), attempt,
         list(dict.fromkeys(zones)),
     )
+
+
+def resolve_runs(runs: object, records: Sequence[Record]) -> tuple[list[str], str | None]:
+    """The run_ids a reply's runs name, oldest first, and None; or [] and why
+    to abstain, for a position or date the records do not hold. Raises
+    RouteError for runs that are not written as PLACES says."""
+    if runs == "all":
+        return [r.run_id for r in records], None
+    if not isinstance(runs, list) or not runs or not all((type(p) is int and p != 0) or isinstance(p, str) for p in runs):
+        raise RouteError('runs must be "all" or a list of non-zero whole numbers and dates')
+    # Two entries can name the same run.
+    chosen = set()
+    for p in runs:
+        if isinstance(p, int):
+            if not -len(records) <= p <= len(records):
+                return [], f"no run at position {p}; {len(records)} recorded"
+            # 1 is the oldest, -1 the most recent.
+            chosen.add(p - 1 if p > 0 else len(records) + p)
+            continue
+        # A day, or a span first/last, matched on the day the run started in its own offset.
+        first, _, last = p.partition("/")
+        try:
+            first, last = date.fromisoformat(first), date.fromisoformat(last or first)
+        except ValueError:
+            raise RouteError(f'{p} is not a date "YYYY-MM-DD" or a span "YYYY-MM-DD/YYYY-MM-DD"') from None
+        if first > last:
+            raise RouteError(f"{p} ends before it starts")
+        matched = [i for i, r in enumerate(records) if r.start_time and first <= r.start_time.date() <= last]
+        if not matched:
+            return [], f"no run started on {p}"
+        chosen.update(matched)
+    return [records[i].run_id for i in sorted(chosen)], None
+
+
+def check_places(zones: object, checkpoints: object, records: Sequence[Record]) -> str | None:
+    """Why to abstain, for a zone or checkpoint the records do not hold, or
+    None. Raises RouteError for lists that are not names."""
+    if not isinstance(checkpoints, list) or not all(isinstance(c, str) and c for c in checkpoints):
+        raise RouteError("checkpoints must be a list of checkpoint ids")
+    # Checked against every run: a checkpoint absent from the runs named is still a fair question.
+    known = set(known_checkpoints(records))
+    unknown = [c for c in checkpoints if c not in known]
+    if unknown:
+        return f"{unknown[0]} is not in the records"
+
+    if not isinstance(zones, list) or not all(isinstance(z, str) and z for z in zones):
+        raise RouteError("zones must be a list of zone names")
+    known = set(known_zones(records))
+    unknown = [z for z in zones if z not in known]
+    if unknown:
+        return f"{unknown[0]} is not a zone in the records"
+    return None

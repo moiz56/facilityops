@@ -1,9 +1,15 @@
 """B-1 Analytical: answers a question over the records (section 8.1).
 
-Three model calls: the router names the runs, zones, checkpoints and
-derivations (b1_analytical_router); the SQL writer writes one SELECT for each
-derivation type (routes/); the prose writer writes a lead-in with no values
-(b1_analytical_prose). Code runs the SELECT through the guard, writes the rows
+First the retrieval router (b1_retrieval_router) decides whether the question
+needs a derivation, a lookup of values as recorded, or neither (abstain). A
+lookup takes the same steps as a derivation, over the lookup database: the
+lookup router (b1_analytical_router_lookup) names the tables, and the SQL
+writer writes one SELECT for each with that table's prompt (lookups/).
+
+A derivation takes three more model calls: the router names the runs, zones,
+checkpoints and derivations (b1_analytical_router_derived); the SQL writer
+writes one SELECT for each derivation type (routes/); the prose writer writes
+a lead-in with no values (b1_analytical_prose). Code runs the SELECT through the guard, writes the rows
 as a template, fills it through fill_slots and verifies the whole answer.
 
 A bad reply, a failed query or a value that does not trace is sent back with
@@ -20,9 +26,12 @@ from dataclasses import asdict, fields, is_dataclass, replace
 from datetime import datetime
 
 from agents.b1_analytical_prose import write_prose
-from agents.b1_analytical_router import RECORDS, Route, RouteError, describe, route_question
-from agents.database import QueryError, run_query
+from agents.b1_analytical_router_derived import RECORDS, Route, RouteError, describe, route_question
+from agents.b1_analytical_router_lookup import route_lookup
+from agents.b1_retrieval_router import RetrievalError, classify_question
+from agents.database_derivation import QueryError, run_query
 from agents.provider import Provider, ProviderError
+from agents.lookups import PROMPTS as LOOKUP_PROMPTS
 from agents.routes import PROMPTS
 from agents.schema import (
     B1Config, B1Result, DerivationConfig, ExtendedRecord, Template, VerificationConfig,
@@ -63,9 +72,11 @@ class PlanError(ValueError):
 
 def answer_question(
     question: str, extended: ExtendedRecord, conn, provider: Provider, config: B1Config,
-    derivation: DerivationConfig, verification: VerificationConfig,
+    derivation: DerivationConfig, verification: VerificationConfig, lookup_conn=None,
 ) -> B1Result:
-    """Answer one question from the database built by database.build_database(extended, ...).
+    """Answer one question from the derivation database (conn, from
+    database_derivation.open_database) or the lookup database (lookup_conn,
+    from database_lookup.open_lookup_database).
 
     Raises ValueError for an empty question or one longer than max_question_chars.
     """
@@ -78,21 +89,39 @@ def answer_question(
     # What each step was given and gave back, for B1Result.trace.
     trace: dict = {
         "question": question,
-        "router": {"calls": [], "route": None},
+        "retrieval": {"calls": [], "result": None},
+        "router": {"kind": None, "calls": [], "route": None},
         "sql_writer": [],
         "prose": {"calls": [], "lead": None},
         "answer_from": None,
     }
 
     try:
-        route = route_question(question, extended.records, provider, config, derivation, trace["router"]["calls"])
+        retrieval = classify_question(question, provider, config, derivation, trace["retrieval"]["calls"])
     except ProviderError as error:
         return B1Result("PROVIDER_UNAVAILABLE", None, None, None, 1, str(error), trace=trace)
+    except RetrievalError as error:
+        return B1Result("REFUSED_UNVERIFIABLE", None, None, None, config.max_attempts,
+                        f"retrieval router: {error}", trace=trace)
+    trace["retrieval"]["result"] = asdict(retrieval)
+    before = retrieval.attempts
+    if retrieval.kind == "abstain":
+        return abstained(f"retrieval router: {retrieval.reason}", extended, verification, before, trace)
+    if retrieval.kind == "lookup":
+        return answer_lookup(question, extended, lookup_conn, provider, config, derivation, verification, before,
+                             trace)
+
+    trace["router"]["kind"] = "derivation"
+    try:
+        route = route_question(question, extended.records, provider, config, derivation, trace["router"]["calls"])
+    except ProviderError as error:
+        return B1Result("PROVIDER_UNAVAILABLE", None, None, None, before + 1, str(error), trace=trace)
     except RouteError as error:
-        return B1Result("REFUSED_UNVERIFIABLE", None, None, None, config.max_attempts, f"router: {error}", trace=trace)
+        return B1Result("REFUSED_UNVERIFIABLE", None, None, None, before + config.max_attempts, f"router: {error}",
+                        trace=trace)
     trace["router"]["route"] = asdict(route)
     if route.abstain:
-        return abstained(route.reason, extended, verification, route.attempts, trace)
+        return abstained(route.reason, extended, verification, before + route.attempts, trace)
 
     # One SQL writer call per derivation type; instances of one type share it.
     by_type: dict[str, list[str]] = {}
@@ -101,14 +130,14 @@ def answer_question(
         kind = RECORDS if name == RECORDS else derivation.derivations[name]["type"]
         by_type.setdefault(kind, []).append(name)
 
-    blocks, slots, values, sqls = [], {}, {}, []
-    attempts, retries = route.attempts, 0
+    blocks, slots, values, notes, sqls = [], {}, {}, [], []
+    attempts, retries = before + route.attempts, 0
     for n, (kind, names) in enumerate(by_type.items()):
         step = {"route": kind, "instances": names, "calls": [], "sql": None, "values": {}, "slots": {}}
         trace["sql_writer"].append(step)
         try:
-            sql, part_lines, part_slots, part_values, calls = write_and_run(
-                question, route, kind, names, n, extended, conn, provider, config, derivation, step["calls"],
+            sql, part_lines, part_slots, part_values, part_notes, calls = write_and_run(
+                question, route, PROMPTS[kind], names, n, extended, conn, provider, config, derivation, step["calls"],
             )
         except ProviderError as error:
             return B1Result("PROVIDER_UNAVAILABLE", None, None, None, attempts + 1, str(error), trace=trace)
@@ -124,7 +153,22 @@ def answer_question(
         blocks.append("\n".join(part_lines))
         slots.update(part_slots)
         values.update(part_values)
+        notes += part_notes
 
+    return finish(question, route, blocks, slots, values, notes, sqls, attempts, retries,
+                  extended, provider, config, derivation, verification, trace)
+
+
+def finish(
+    question: str, route, blocks: list[str], slots: dict[str, str], values: dict[str, object], notes: list[str],
+    sqls: list[str], attempts: int, retries: int, extended: ExtendedRecord, provider: Provider, config: B1Config,
+    derivation: DerivationConfig, verification: VerificationConfig, trace: dict,
+) -> B1Result:
+    """From the SQL writer's rows to the answer, for a derivation or a lookup:
+    the rows as a template, filled from the records, a lead-in above them,
+    and the whole answer verified. route is the Route or LookupRoute. notes
+    are the code-written texts the rows hold (a template's TEXT_COLUMNS), in
+    order: they are shown uncited and their spans are not verified."""
     # Code writes the answer's facts: the rows as a template, filled from the
     # records, so every value and its citation comes from code.
     sql = "\n\n".join(sqls)
@@ -158,7 +202,8 @@ def answer_question(
         output = {"answer": answer, "citations": [], "records_consulted": route.run_ids}
         return B1Result(status, output, None, sql, attempts, why or "fill and verification are off", template, trace)
 
-    result = replace(verify_numeric(answer, extended, verification, placed), regeneration_attempts=retries)
+    exempt = [(start + offset, end + offset) for start, end in note_spans(facts, notes)]
+    result = replace(verify_numeric(answer, extended, verification, placed, exempt), regeneration_attempts=retries)
     if not result.passed:
         log.warning("B-1 answer failed verification: %s", result.failures)
         return B1Result("REFUSED_UNVERIFIABLE", None, result, sql, attempts, "the answer did not verify", template, trace)
@@ -176,6 +221,19 @@ def answer_question(
     return B1Result(status, output, result, sql, attempts, why, template, trace)
 
 
+def note_spans(facts: str, notes: list[str]) -> list[tuple[int, int]]:
+    """Where each note sits in the facts. Notes are written in order, so each
+    is looked for after the one before."""
+    spans, at = [], 0
+    for note in notes:
+        start = facts.find(note, at)
+        if start < 0:
+            continue
+        spans.append((start, start + len(note)))
+        at = start + len(note)
+    return spans
+
+
 def run_of(path: str, extended: ExtendedRecord) -> str | None:
     """The run a cited path belongs to, or None for a value about all runs (D7, D8)."""
     if m := re.match(r"records\[(\d+)\]", path):
@@ -185,6 +243,64 @@ def run_of(path: str, extended: ExtendedRecord) -> str | None:
         if isinstance(output, dict):
             return output.get("run_id")
     return None
+
+
+def answer_lookup(
+    question: str, extended: ExtendedRecord, conn, provider: Provider, config: B1Config,
+    derivation: DerivationConfig, verification: VerificationConfig, attempts: int, trace: dict,
+) -> B1Result:
+    """A question the retrieval router sent to lookup: the lookup router names
+    the tables, the SQL writer writes one SELECT for each over the lookup
+    database (conn), and finish writes the answer. attempts is the model calls
+    made before this."""
+    trace["router"]["kind"] = "lookup"
+    try:
+        route = route_lookup(question, extended.records, provider, config, trace["router"]["calls"])
+    except ProviderError as error:
+        return B1Result("PROVIDER_UNAVAILABLE", None, None, None, attempts + 1, str(error), trace=trace)
+    except RouteError as error:
+        return B1Result("REFUSED_UNVERIFIABLE", None, None, None, attempts + config.max_attempts,
+                        f"lookup router: {error}", trace=trace)
+    trace["router"]["route"] = asdict(route)
+    attempts += route.attempts
+    if route.abstain:
+        return abstained(route.reason, extended, verification, attempts, trace)
+    if conn is None:
+        return B1Result("REFUSED_UNVERIFIABLE", None, None, None, attempts, "lookup: no lookup database", trace=trace)
+    missing = [table for table in route.tables if table not in LOOKUP_PROMPTS]
+    if missing:
+        return B1Result("REFUSED_UNVERIFIABLE", None, None, None, attempts,
+                        f"lookup: no template for the {missing[0]} table yet", trace=trace)
+
+    # One SQL writer call per table.
+    blocks, slots, values, notes, sqls = [], {}, {}, [], []
+    retries = 0
+    for n, table in enumerate(route.tables):
+        step = {"route": table, "instances": [], "calls": [], "sql": None, "values": {}, "slots": {}}
+        trace["sql_writer"].append(step)
+        try:
+            sql, part_lines, part_slots, part_values, part_notes, calls = write_and_run(
+                question, route, LOOKUP_PROMPTS[table], [], n, extended, conn, provider, config, derivation,
+                step["calls"],
+            )
+        except ProviderError as error:
+            return B1Result("PROVIDER_UNAVAILABLE", None, None, None, attempts + 1, str(error), trace=trace)
+        except PlanError as error:
+            return B1Result("REFUSED_UNVERIFIABLE", None, None, None, attempts + config.max_attempts, str(error),
+                            trace=trace)
+        attempts += calls
+        retries += calls - 1
+        if sql is None:
+            return abstained(f"the SQL writer abstained ({table})", extended, verification, attempts, trace)
+        step.update(sql=sql, values=part_values, slots=part_slots)
+        sqls.append(sql)
+        blocks.append("\n".join(part_lines))
+        slots.update(part_slots)
+        values.update(part_values)
+        notes += part_notes
+
+    return finish(question, route, blocks, slots, values, notes, sqls, attempts, retries,
+                  extended, provider, config, derivation, verification, trace)
 
 
 def abstained(
@@ -197,10 +313,14 @@ def abstained(
 
 
 def write_and_run(
-    question: str, route: Route, kind: str, names: list[str], n: int, extended: ExtendedRecord, conn,
+    question: str, route, module, names: list[str], n: int, extended: ExtendedRecord, conn,
     provider: Provider, config: B1Config, derivation: DerivationConfig, calls: list[dict] | None = None,
-) -> tuple[str | None, list[str], dict[str, str], dict[str, object], int]:
-    """Ask the SQL writer for kind's query and run it: (sql, lines, slots, values, calls made).
+) -> tuple[str | None, list[str], dict[str, str], dict[str, object], list[str], int]:
+    """Ask the SQL writer for the query in module's prompt (a derivation route
+    or a lookup table) and run it on conn: (sql, lines, slots, values, notes,
+    calls made).
+    route is the Route or LookupRoute; names the derivation instances, or []
+    for a lookup.
 
     sql is None when the model abstained. Raises ProviderError, or PlanError
     when no reply passes after max_attempts. calls, if given, gets {attempt,
@@ -210,19 +330,19 @@ def write_and_run(
     calls = [] if calls is None else calls
     feedback = ""
     for attempt in range(1, config.max_attempts + 1):
-        prompt = build_prompt(PROMPTS[kind], question, route, names, derivation, feedback)
+        prompt = build_prompt(module, question, route, names, derivation, feedback)
         reply = provider.complete(prompt, temperature=config.temperature, schema=SQL_REPLY_SCHEMA)
         try:
             sql = parse_reply(reply)
             if sql is None:
                 calls.append({"attempt": attempt, "reply": reply, "rejected": None})
-                return None, [], {}, {}, attempt
+                return None, [], {}, {}, [], attempt
             log.info("B-1 SQL attempt %d: %s", attempt, sql)
-            lines, slots, values, summary = build_lines(
-                sql, conn, route, PROMPTS[kind], names, n, extended, config, derivation,
+            lines, slots, values, notes, summary = build_lines(
+                sql, conn, route, module, names, n, extended, config, derivation,
             )
             calls.append({"attempt": attempt, "reply": reply, "rejected": None, "summary_sql": summary})
-            return sql, lines, slots, values, attempt
+            return sql, lines, slots, values, notes, attempt
         except ValueError as error:
             # PlanError, QueryError, or a shown value that does not trace to the records.
             log.warning("B-1 SQL attempt %d rejected: %s", attempt, error)
@@ -271,17 +391,19 @@ def parse_reply(reply: str) -> str | None:
 def build_lines(
     sql: str, conn, route: Route, module, names: list[str], n: int, extended: ExtendedRecord,
     config: B1Config, derivation: DerivationConfig,
-) -> tuple[list[str], dict[str, str], dict[str, object], str | None]:
+) -> tuple[list[str], dict[str, str], dict[str, object], list[str], str | None]:
     """Run the query; the answer's facts as a template, grouped by run.
 
     Each run's id is a heading line, "Run {{ slot }}", written when the run
     changes; under it one line per row, "- column {{ slot }}, ...". Rows with
     no run_id (D7, D8) are the lines alone.
 
-    Returns (lines, slots, values, summary): slots maps each slot to its path
-    in the extended record (only when FILL_AND_VERIFY is on), values to the
-    cell the query returned, and summary is the summary query code ran, or
-    None. Slot ids are q<query>_r<row>_<column>.
+    Returns (lines, slots, values, notes, summary): slots maps each slot to
+    its path in the extended record (only when FILL_AND_VERIFY is on), values
+    to the cell the query returned, notes are the cells of the module's
+    TEXT_COLUMNS, written as they are with no slot (text code wrote that no
+    field holds, e.g. a lookup's exclusion reason), and summary is the
+    summary query code ran, or None. Slot ids are q<query>_r<row>_<column>.
 
     When it returns no rows, the module's SUMMARY_SQL is run instead, so the
     answer states the stored run-level result (e.g. exceeds_count 0) rather
@@ -310,7 +432,8 @@ def build_lines(
         shown = [c for c in columns if not is_path(c) and c not in ORDER_ONLY]
         lines.append(NO_ROWS)
 
-    slots, values = {}, {}
+    slots, values, notes = {}, {}, []
+    text_columns = getattr(module, "TEXT_COLUMNS", ())
     run = None
     for r, row in enumerate(rows):
         cells = dict(zip(columns, row))
@@ -326,6 +449,10 @@ def build_lines(
                 continue   # e.g. reason on an OK run, delta on a NOT_COMPUTABLE checkpoint
             if c == "run_id" and cells[c] == run:
                 continue   # a run's id heads its rows once
+            if c in text_columns:
+                notes.append(str(cells[c]))
+                parts.append(f"{c.replace('_', ' ')} {cells[c]}")
+                continue
             slot_id = f"q{n}_r{r}_{c}"
             values[slot_id] = cells[c]
             if FILL_AND_VERIFY:
@@ -346,7 +473,7 @@ def build_lines(
             parts.append(f"{c.replace('_', ' ')} {{{{ {slot_id} }}}}")
         if parts:
             lines.append("- " + ", ".join(parts))
-    return lines, slots, values, summary
+    return lines, slots, values, notes, summary
 
 
 # Columns a query may select only to sort by, e.g. a UNION ALL's ORDER BY,

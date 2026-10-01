@@ -81,8 +81,15 @@ SECTION_NAMES = (
 #: know about (decision 153). Both still get a contents row, because a reader
 #: looking for them needs a page number, and the manifest merges the gap list
 #: into coverage's range so its ids stay the ones 5.7 defines.
+#:
+#: The executive summary is B-2's (Milestone 2, 8.3), not one of the seven. Its
+#: page also holds B-2's coverage statement, below the summary. Its switch is on
+#: only when B-2 gave text for either (see switches_for), so the manifest names
+#: it only when the PDF holds it.
 RENDERED_BLOCKS = (
     ("cover", "cover", "Cover"),
+    ("executive_summary", "executive-summary", "Executive summary"),
+    ("action_plan", "action-plan", "Action plan"),
     (None, "contents", "Contents"),
     ("coverage", "coverage", "Coverage and reconciliation"),
     ("coverage", "gaps", "All gaps"),
@@ -1505,6 +1512,62 @@ def sections(config: dict) -> dict[str, bool]:
     return {name: setting(config, "sections", name) for name in SECTION_NAMES}
 
 
+def switches_for(
+    config: dict, executive_summary: str | None, coverage_statement: str | None = None,
+    action_plan: dict | None = None,
+) -> dict[str, bool]:
+    """The seven sections' switches, plus the agents' two pages: the executive
+    summary page renders when B-2 gave a summary, a coverage statement, or both;
+    the action plan when B-3 gave one."""
+    on = executive_summary is not None or coverage_statement is not None
+    return {**sections(config), "executive_summary": on, "action_plan": action_plan is not None}
+
+
+def summary_blocks(text: str | None) -> list[tuple[str, list[str]]]:
+    """B-2's summary text as blocks: ("p", [sentence]) or ("ul", [items]).
+
+    Paragraphs are split by blank lines. Inside one, a line starting "- " is a
+    bullet, and consecutive bullets make one list.
+    """
+    blocks: list[tuple[str, list[str]]] = []
+    for paragraph in (text or "").split("\n\n"):
+        bullets = None
+        for line in paragraph.split("\n"):
+            if line.startswith("- "):
+                if bullets is None:
+                    bullets = []
+                    blocks.append(("ul", bullets))
+                bullets.append(line[2:])
+            else:
+                bullets = None
+                blocks.append(("p", [line]))
+    return blocks
+
+
+def plan_tables(record: Record, plan: dict | None) -> dict | None:
+    """B-3's plan as the action plan section's two tables, or None.
+
+    plan is B-3's output body: actions and unmapped, as B-3 produced and
+    verified them. Each action also gets the severities of the findings it
+    references, read off the record by finding_id, so the table can badge them
+    as the findings section does, and its category as words.
+    """
+    if plan is None:
+        return None
+    severity = {f.finding_id: f.severity for f in record.findings}
+    actions = [
+        {
+            **action,
+            "category_label": action["category"].replace("_", " "),
+            "severities": list(dict.fromkeys(
+                severity[f] for f in action["referencing_findings"] if severity.get(f)
+            )),
+        }
+        for action in plan["actions"]
+    ]
+    return {"actions": actions, "unmapped": plan["unmapped"]}
+
+
 def provenance_line(provenance: Provenance, footer_text: str) -> str:
     """The footer sentence that appears on every page.
 
@@ -1590,6 +1653,11 @@ def render_html(
     config: dict,
     image_dir: Path | None = None,
     contents: Sequence[ContentsRow] = (),
+    executive_summary: str | None = None,
+    section_intros: dict[str, str] | None = None,
+    item_notes: Sequence[str | None] | None = None,
+    coverage_statement: str | None = None,
+    action_plan: dict | None = None,
 ) -> str:
     """Render the whole report to HTML.
 
@@ -1599,6 +1667,16 @@ def render_html(
     `image_dir` is where images.py writes the copies it has sized down (5.5).
     None means no resizing, which is what an HTML render wants: nothing is
     embedded, so there is no file size to keep within budget.
+
+    `executive_summary` is B-2's summary text, paragraphs split by blank lines,
+    or None to leave the section out. `section_intros` is B-2's introduction
+    text per zone, printed under the zone's heading; a zone not in it, or None,
+    gets none. `item_notes` is B-2's note per checkpoint in record order (None
+    for one it refused), printed under the checkpoint's badges.
+    `coverage_statement` is B-2's coverage statement, printed below the
+    executive summary on its page; None leaves it out. `action_plan` is B-3's
+    output body (actions, unmapped), its own section after the executive
+    summary page, as tables; None leaves it out.
     """
     rows = count_rows(derived, disagreeing_counts(record))
     evidence = evidence_rows(record, gaps)
@@ -1608,7 +1686,9 @@ def render_html(
     field_units = units(config)
     field_places = decimals(config)
     template = environment(field_places).get_template("full_report.html.j2")
-    section_switches = sections(config)
+    section_switches = switches_for(config, executive_summary, coverage_statement, action_plan)
+    # Matched to the checkpoint object itself, not its id: an id can repeat.
+    notes = {id(cp): note for cp, note in zip(record.checkpoints, item_notes or ()) if note}
     return template.render(
         record=record,
         # The contents page is rendered twice: once with no page numbers, to
@@ -1619,6 +1699,11 @@ def render_html(
         derived=derived,
         grids=grids,
         sections=section_switches,
+        executive_summary=summary_blocks(executive_summary) if executive_summary else None,
+        section_intros={zone: summary_blocks(text) for zone, text in (section_intros or {}).items()},
+        item_note=lambda checkpoint: notes.get(id(checkpoint)),
+        coverage_statement=summary_blocks(coverage_statement) if coverage_statement else None,
+        action_plan=plan_tables(record, action_plan),
         logo_uri=logo_uri(config),
         count_rows=rows,
         counts_disagree=any(row.disagrees for row in rows),
@@ -1704,6 +1789,11 @@ def render_document(
     config: dict,
     output_dir: Path = OUTPUT_DIR,
     provenance: Provenance | None = None,
+    executive_summary: str | None = None,
+    section_intros: dict[str, str] | None = None,
+    item_notes: Sequence[str | None] | None = None,
+    coverage_statement: str | None = None,
+    action_plan: dict | None = None,
 ) -> tuple[Path, PageMap]:
     """Render one run to a PDF, and report where each section landed in it.
 
@@ -1725,7 +1815,7 @@ def render_document(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / f"report_{record.run_id}.pdf"
-    switches = sections(config)
+    switches = switches_for(config, executive_summary, coverage_statement, action_plan)
     stylesheets = [
         CSS(filename=str(stylesheet_path(config))),
         CSS(string=runtime_css(config, footer, header_lines(record))),
@@ -1738,7 +1828,8 @@ def render_document(
         rows = contents_rows(switches)
         for attempt in range(3):
             html = render_html(
-                record, gaps, derived, grids, config, Path(image_dir), rows,
+                record, gaps, derived, grids, config, Path(image_dir), rows, executive_summary,
+                section_intros, item_notes, coverage_statement, action_plan,
             )
             document = HTML(string=html, base_url=str(TEMPLATE_DIR)).render(
                 stylesheets=stylesheets,

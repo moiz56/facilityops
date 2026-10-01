@@ -1,14 +1,37 @@
-{#- B-2 item note: one sentence per checkpoint. Arguments are slot
-    placeholders or lists of them. -#}
+{#- B-2 item note: one per checkpoint (worked example, section 3). Every
+    argument that prints a value is a slot placeholder from
+    b2_narrative.Writer; code fills it. Arguments ending in _n are plain numbers
+    used only to choose wording, and are never printed. The literal text holds
+    no digits and no number words.
 
-{% macro missed(checkpoint, status, reason) -%}
-{{ checkpoint }} was not reached (status {{ status }}); reason recorded: {{ reason }}.
+    b2_narrative.item_notes picks the variant, in this order: missed, no
+    evidence, sensor warning, normal. A normal checkpoint with no findings is
+    followed by "No findings recorded for this checkpoint." -#}
+
+{% macro missed(name, reason) -%}
+{{ name }} was not reached{% if reason %}; the recorded reason is "{{ reason }}"{% else %}, and no reason was recorded{% endif %}.
 {%- endmacro %}
 
-{% macro finding(feature, severity, status) -%}
-{{ feature }} (severity {{ severity }}, status {{ status }})
+{% macro no_evidence(name, result, findings, findings_n, items) -%}
+{{ name }} returned {{ result }} with no evidence captured{% if findings_n %}, and carries {{ findings }} finding{{ "" if findings_n == 1 else "s" }} of {{ items }}{% endif %}.
 {%- endmacro %}
 
-{% macro visited(checkpoint, status, result, observed, findings) -%}
-{{ checkpoint }} has status {{ status }} and result {{ result }}, observed {{ observed }}; {% if findings %}findings recorded: {{ findings | join("; ") }}{% else %}no findings recorded for this checkpoint{% endif %}.
+{% macro finding(feature, severity) -%}
+{{ feature }} at severity {{ severity }}
+{%- endmacro %}
+
+{% macro warning(name, result, readings) -%}
+{{ name }} returned {{ result }}, and {{ readings }}.
+{%- endmacro %}
+
+{% macro reading(metric, value, unit, label) -%}
+{% if value %}recorded a {{ metric }} of {{ value }}{% if unit %} {{ unit }}{% endif %} which raised a {{ label }} warning{% else %}raised a {{ label }} warning{% endif %}
+{%- endmacro %}
+
+{% macro normal(name, result, observed, rgb, rgb_n, thermal, thermal_n) -%}
+{{ name }} returned {{ result }}{% if observed %} on {{ observed }}{% endif %}, with {{ rgb }} direction{{ "" if rgb_n == 1 else "s" }} photographed and {{ thermal }} thermal pair{{ "" if thermal_n == 1 else "s" }} captured.
+{%- endmacro %}
+
+{% macro nothing() -%}
+No findings recorded for this checkpoint.
 {%- endmacro %}

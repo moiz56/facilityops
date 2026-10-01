@@ -1,0 +1,92 @@
+{# Action plan - B-3 (Milestone 2, section 8.4).
+
+   Rendered only when sections.action_plan is true and B-3 returned a plan,
+   straight after the executive summary page. Two tables from B-3's output:
+   the actions, most urgent first, and the finding types with no configured
+   action. Each action is the finding's own recommended_action, carried
+   verbatim; B-3 adds its priority, category and the checkpoints it covers.
+   Severities are badged as in the findings section. Autoescaped. #}
+<section class="section action-plan" id="action-plan">
+
+  <h2>Action plan</h2>
+
+  <p class="lede">
+    Each action is the recommended action recorded with its findings, carried
+    as written. Findings of one type that share an action are grouped into one
+    row. Priority runs from the most urgent; rows with equal priority are
+    equally urgent.
+  </p>
+
+  {% if action_plan.actions %}
+    <table class="data-table action-table">
+      <colgroup>
+        <col class="col-priority">
+        <col class="col-action">
+        <col class="col-category">
+        <col class="col-severity">
+        <col class="col-count">
+        <col class="col-checkpoints">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Priority</th>
+          <th>Action</th>
+          <th>Category</th>
+          <th>Severity</th>
+          <th>Findings</th>
+          <th>Checkpoints</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for action in action_plan.actions %}
+          <tr>
+            <td class="figure action-priority">{{ action.priority }}</td>
+            <td>{{ action.action }}</td>
+            <td>{{ action.category_label }}</td>
+            <td>
+              {% for severity in action.severities %}
+                <span class="badge badge-small badge-{{ severity | severity_style }}">{{ severity }}</span>
+              {% endfor %}
+            </td>
+            <td class="figure">{{ action.finding_count }}</td>
+            <td class="action-checkpoints">{{ action.checkpoints | join(", ") }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="absent-note">No findings were recorded for this run, so the plan has no actions.</p>
+  {% endif %}
+
+  <h3>Finding types with no configured action</h3>
+
+  {% if action_plan.unmapped %}
+    <p class="lede">
+      These finding types have no action in the configured mapping. None is
+      inferred from a similar name; each needs manual review.
+    </p>
+    <table class="data-table unmapped-table">
+      <thead>
+        <tr>
+          <th>Finding type</th>
+          <th>Findings</th>
+          <th>Checkpoints</th>
+          <th>Statement</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in action_plan.unmapped %}
+          <tr>
+            <td>{{ entry.feature | show }}</td>
+            <td class="figure">{{ entry.finding_count }}</td>
+            <td class="action-checkpoints">{{ entry.checkpoints | join(", ") }}</td>
+            <td>{{ entry.statement }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="absent-note">Every finding type recorded on this run has a configured action.</p>
+  {% endif %}
+
+</section>

@@ -242,7 +242,7 @@ Raised for a placeholder with no path, a path that finds nothing, a None, or
 an empty string or list. A NOT_COMPUTABLE value has no mean/max key, so a slot
 pointing at one raises rather than printing a blank.
 
-## build_database (database.py)
+## build_database (database_derivation.py)
 
 The extended record as an in-memory SQLite database (standard library, no
 file), for B-1 to query. Built after extend_record from the extended record
@@ -287,7 +287,7 @@ event_log, live_detections, checkpoint detections (the same shape as
 findings), coordinates, raw sensor duplicates, sensor warnings, stale (the
 readings table has a stale column).
 
-## run_query (database.py)
+## run_query (database_derivation.py)
 
 run_query(conn, sql, max_rows, timeout_seconds) -> (columns, rows). The limits
 are enforced by SQLite, not asked of the model:
@@ -310,7 +310,7 @@ citations: a result column with no path cannot fill a slot.
 ## B-1 analytical (b1_analytical.py, provider.py)
 
 Three model calls: the router names the runs, checkpoints and derivations a
-question is about (b1_analytical_router); the SQL writer for the routed
+question is about (b1_analytical_router_derived); the SQL writer for the routed
 derivation's type writes one SELECT over its tables (routes/); the prose
 writer writes a lead-in (b1_analytical_prose). Code does everything else.
 
@@ -367,7 +367,7 @@ Beyond the brief: JSON replies held to a schema
 complete() takes an optional JSON schema (the brief's complete(prompt) still
 works). Given one, the provider's structured output mode holds the reply to
 it: Claude's output_config.format, Gemini's responseJsonSchema. The router,
-the SQL writer and B-2's order pass one; prose replies do not. Replies often
+and the SQL writer pass one; prose replies do not. Replies often
 broke the JSON shape the prompt asked for, and each break cost a retry. Every
 key is required, so an abstain fills the others with empty values, which are
 ignored. The parsers still check every reply.
@@ -379,60 +379,22 @@ status outside the closed set, and an OK whose verification did not pass, so
 no caller can mislabel a result. agent_version is a constant in the module,
 not config: it versions the code.
 
-## B-2 narrative (b2_narrative.py)
+## Lookup exclusion reasons are shown uncited (b1_analytical, verification.py)
 
-Code writes every sentence; the model only orders the executive summary's
-facts (section 1.1: "salience and ordering"). Each sentence is a Jinja macro
-in templates/ that receives slot placeholders, never values; fill_slots then
-fills them, so each value has a span and a citation.
-- The model sees what each fact is about (a fixed description, and "nothing
-  to report" when a tally is zero), never its text. It returns an order that
-  must list every fact once. Record text never reaches it (TB-10).
-- Provider down, or no valid order after max_attempts: code's order is used
-  and the summary is DEGRADED_TEMPLATE_ONLY. Never a partial document.
-- coverage, section_intro and item_note make no model call: OK, model null,
-  method deterministic.
-- Every count B-2 states is a derivation (derivations.yaml gained counts for
-  completed, missed, passed and warned checkpoints, abstained findings, and
-  critical and warning alerts), found by what it counts, not by name. A
-  declared count is compared with it; where they differ, both are stated and
-  called a disagreement (section 10.6).
-- A section that fails verification is REFUSED_UNVERIFIABLE with no text.
-Open: the 150-250 word target for the summary is not enforced; the result
-counts leave out MISSED checkpoints (eligibility rule 1) while the report
-engine's coverage page counts all of them; record text with numbers in it
-(a reason reading "8 of 8") fails verification.
+Every value in a B-1 answer is a slot traced to a path in the extended record.
+A lookup's exclusion reason cannot be: "sps30_ok=false" or "sensor status is
+offline" is eligibility's verdict, written by code from the record's own flags,
+and no field holds it. Without it, "why is there no PM2.5 reading" could not be
+answered at all.
 
-## B-3 action plan (b3_action.py, action_mapping.yaml)
+So a lookup template may name TEXT_COLUMNS (only checkpoint_readings does:
+reason). build_lines writes those cells as they are, with no slot and no
+citation, and finish passes their spans in the facts to verify_numeric as
+exempt: tokens inside them are not checked or counted. Only those spans: the
+lead-in, every value, id, field name and timestamp are still traced and
+verified. Derivation routes name no TEXT_COLUMNS, so their reason columns stay
+traced as before.
 
-Deterministic by default (prose: false): no provider call, OK, model null,
-method deterministic. The action is always the finding's own
-recommended_action, verbatim.
-- Category from action_mapping.yaml by feature. A feature not listed is
-  unmapped and stated as such; nothing is inferred from similar names
-  (airflow_obstruction stays unmapped).
-- Grouping: by feature and action text. Two findings of one feature with
-  different texts are two actions, because B-3 may not merge texts. A finding
-  id listed twice counts once.
-- A mapped feature whose finding has no recommended_action goes to unmapped,
-  stated as "No recommended action is recorded for finding type X."
-- Priority: a dense rank of (severity rank of the group's most severe
-  finding, category rank, first route position of its checkpoints). Equal
-  keys share a priority. A severity the mapping does not know ranks after
-  info. Category ranks are TUNABLE: airflow 1, review_evidence 2,
-  sensor_review 3, recapture 4.
-- finding_count is the length of the action's own referencing_findings. The
-  text names checkpoints and findings instead of stating a count, because
-  counting per feature would be arithmetic outside the derivation layer and
-  features are an open set.
-- Output adds "text" (the plan rendered from b3_action.j2) beside actions,
-  unmapped and citations, so claim_span has a text to point into. The
-  contract shape lists no text field; this is a deliberate addition, to raise
-  with the client.
-- Trend statements are not made. Section 8.4 allows them ("may"), but a
-  trend needs values compared across runs, which is a ninth derivation, and
-  section 17 bans "rising". Silence complies; raised for the client.
-- prose: true adds one opening sentence from the model. It may hold no
-  number, name or characterising word (checked with the verifier's own token
-  extractor); otherwise DEGRADED_TEMPLATE_ONLY with no sentence.
-
+An excluded reading's row cites where its field sits
+(records[i].checkpoints[j].sensor.<block>.<field>), so its field and block
+names trace as keys; its value there is never shown.

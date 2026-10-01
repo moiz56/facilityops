@@ -241,6 +241,16 @@ def gather(extended: ExtendedRecord, config: VerificationConfig) -> Known:
                 if name.endswith("_formatted"):
                     known.derived_formatted.setdefault(value, (path, instance))
 
+    # B-2's run values (b2_narrative.run_values): every number there is a count.
+    for run_id, entry in extended.derived.run_values.items():
+        for path, value in walk(entry, f"derived.run_values.{run_id}"):
+            if isinstance(value, (list, tuple)):
+                known.largest_list = max(known.largest_list, len(value))
+            elif isinstance(value, int) and not isinstance(value, bool):
+                known.derived_counts.append((path, "run_values", value))
+            elif isinstance(value, str):
+                known.derived_strings.setdefault(value, (path, "run_values"))
+
     known.versions = {
         extended.extended_record_version, extended.derivation_set_version,
         config.engine_version, config.template_version,
@@ -342,6 +352,7 @@ def check_measurement(
 
 def verify_numeric(
     text: str, extended: ExtendedRecord, config: VerificationConfig, slots: Sequence[FilledSlot] = (),
+    exempt: Sequence[tuple[int, int]] = (),
 ) -> VerificationResult:
     """Extract, classify and check every numeric token in the text (section 6).
 
@@ -355,10 +366,17 @@ def verify_numeric(
     is checked against that slot's source field: the slot's span must hold
     exactly what the field holds. Beyond the brief, which checks each token on
     its own; see DECISIONS.md.
+
+    exempt, if given, are spans of text code wrote that no field holds (a
+    lookup's exclusion reason, e.g. "sps30_ok=false"): their tokens are not
+    checked or counted. See DECISIONS.md.
     """
     known = gather(extended, config)
     in_text = [slot for slot in slots if recorded_text(slot, text, extended)]
-    tokens = extract_tokens(text, config.word_numbers)
+    tokens = [
+        (token, start, end) for token, start, end in extract_tokens(text, config.word_numbers)
+        if not any(s <= start and end <= e for s, e in exempt)
+    ]
     by_class = {c.value: 0 for c in TokenClass}
     derived_values_used: list[str] = []
     failures: list[dict] = []

@@ -307,8 +307,8 @@ CREATE TABLE d3_numerator_ids (
 # mean of a different field. d4_schema fills this in for each one from derivations.yaml.
 D4_TABLE = """
 -- D4 {instance}: the mean of {field_path} over each run's {source}, per {group_by}.
--- Per zone: a zone is an area of the route (e.g. rowA_back) holding one or more
--- checkpoints (e.g. a3_back); the mean is over every reading in the zone.
+-- Per zone: a zone is an area of the route holding one or more checkpoints;
+-- the mean is over every reading in the zone.
 -- One row per group and run. A run where no group could be worked out has a
 -- single row: group_key NULL, status NOT_COMPUTABLE, and the reason.
 CREATE TABLE d4_{instance} (
@@ -345,8 +345,8 @@ CREATE TABLE d4_{instance}_checkpoints (
 # fills this in for each one from derivations.yaml.
 D5_TABLE = """
 -- D5 {instance}: the maximum of {field_path} over each run's {source}, per {group_by},
--- and which reading it was. Per zone: a zone is an area of the route (e.g.
--- rowA_back) holding one or more checkpoints (e.g. a3_back). One row per group and run. A run where no group
+-- and which reading it was. Per zone: a zone is an area of the route holding
+-- one or more checkpoints. One row per group and run. A run where no group
 -- could be worked out has a single row: group_key NULL, status NOT_COMPUTABLE,
 -- and the reason.
 CREATE TABLE d5_{instance} (
@@ -546,14 +546,18 @@ def build_database(extended: ExtendedRecord, config: DerivationConfig) -> sqlite
 
 
 def open_database(extended: ExtendedRecord, config: DerivationConfig, path: Path) -> tuple[sqlite3.Connection, bool]:
-    """The database for extended, in memory, and whether it was reused.
+    """The database for extended, in memory, and whether it was reused (see open_saved)."""
+    return open_saved(path, database_fingerprint(extended, config), lambda: build_database(extended, config))
+
+
+def open_saved(path: Path, fingerprint: str, build) -> tuple[sqlite3.Connection, bool]:
+    """A database in memory, and whether it was reused.
 
     A copy is kept at path between runs, with the fingerprint it was built
     from. When the fingerprint still matches, the copy is loaded into memory
-    instead of building again; otherwise the database is built and the copy
+    instead of building again; otherwise build() makes it and the copy is
     replaced. A copy that cannot be read is rebuilt.
     """
-    fingerprint = database_fingerprint(extended, config)
     if path.is_file():
         try:
             disk = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
@@ -570,7 +574,7 @@ def open_database(extended: ExtendedRecord, config: DerivationConfig, path: Path
         except sqlite3.Error:
             pass   # an older or damaged copy: build a new one
 
-    conn = build_database(extended, config)
+    conn = build()
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     temporary.unlink(missing_ok=True)

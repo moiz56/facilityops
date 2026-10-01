@@ -1,35 +1,112 @@
-{#- B-2 coverage statement: declared counts beside computed ones, then the
-    missed checkpoints and those with no evidence. Arguments are slot
-    placeholders or wording chosen by code. -#}
+{#- B-2 coverage statement: one per run (worked example, section 4). As long
+    as the facts require: completion, evidence, images and thermal, sensor
+    availability, then the record's own contradictions, in descending order of
+    how badly they compromise the record. A paragraph with nothing wrong is one
+    sentence; one that has nothing to say is left out.
 
-{% macro row_agree(label, declared, computed) -%}
-{{ label }}: {{ computed }}, matching the declared {{ declared }}.
+    Every argument that prints a value is a slot placeholder from
+    b2_narrative.Writer; code fills it. Arguments ending in _n are plain numbers
+    used only to choose wording, and are never printed. The literal text holds
+    no digits and no number words. A line starting "- " is a bullet. -#}
+
+{# --- completion --- #}
+
+{% macro route(required, required_n) -%}
+The route defines {{ required }} required checkpoint{{ "" if required_n == 1 else "s" }}.
 {%- endmacro %}
 
-{% macro row_disagree(label, declared, computed, source) -%}
-{{ label }}: the robot declared {{ declared }}, but {{ source }} holds {{ computed }}; these figures disagree.
+{% macro empty() -%}
+No checkpoints were recorded for this run.
 {%- endmacro %}
 
-{% macro row_uncomputed(label, declared) -%}
-{{ label }}: declared {{ declared }}; no computed count is configured.
+{% macro all_completed(completed) -%}
+All {{ completed }} were reached and completed, and none were missed.
 {%- endmacro %}
 
-{% macro missed_item(checkpoint, reason) -%}
-{{ checkpoint }}, reason: {{ reason }}
+{% macro completion(completed, required, missed, missed_n) -%}
+{{ completed }} of the {{ required }} were completed{% if missed_n %} and {{ missed }} {{ "was" if missed_n == 1 else "were" }} missed:{% else %}.{% endif %}
 {%- endmacro %}
 
-{% macro missed(items) -%}
-Missed: {{ items | join("; ") }}.
+{% macro missed_item(name, reason) -%}
+- {{ name }}: {% if reason %}"{{ reason }}"{% else %}no reason recorded{% endif %}
 {%- endmacro %}
 
-{% macro no_evidence_item(checkpoint, observed) -%}
-{{ checkpoint }}, observed {{ observed }}
+{# --- evidence --- #}
+
+{% macro all_evidence(reached) -%}
+All {{ reached }} checkpoints reached captured evidence.
 {%- endmacro %}
 
-{% macro no_evidence(items) -%}
-Completed with no evidence images: {{ items | join("; ") }}.
+{% macro some_evidence(with_evidence, reached) -%}
+{{ with_evidence }} of the {{ reached }} checkpoints reached captured evidence.
 {%- endmacro %}
 
-{% macro no_checkpoints(run) -%}
-Run {{ run }} recorded no checkpoints.
+{% macro no_evidence_item(bullet, name, observed) -%}
+{{ "- " if bullet else "" }}{{ name }} captured none{% if observed %}, and is recorded with observed: {{ observed }}{% endif %}.
+{%- endmacro %}
+
+{# --- images and thermal --- #}
+
+{% macro images(with_evidence, with_evidence_n, images, resolved) -%}
+Across the {{ with_evidence }} checkpoint{{ "" if with_evidence_n == 1 else "s" }} that captured evidence, {{ images }} images were referenced{% if resolved %} and {{ resolved }} resolved{% endif %}.
+{%- endmacro %}
+
+{% macro thermal_complete() -%}
+Each of them captured a thermal image for every direction photographed.
+{%- endmacro %}
+
+{% macro thermal_lead(word) -%}
+Thermal coverage was {{ word }}:
+{%- endmacro %}
+
+{% macro thermal_full(names) -%}
+- A thermal image for every direction photographed: {{ names }}.
+{%- endmacro %}
+
+{% macro thermal_partial(items) -%}
+- Thermal images for some directions: {{ items }}.
+{%- endmacro %}
+
+{% macro thermal_some(name, pairs, directions) -%}
+{{ name }} ({{ pairs }} of {{ directions }})
+{%- endmacro %}
+
+{% macro thermal_none(names) -%}
+- No thermal images: {{ names }}.
+{%- endmacro %}
+
+{# --- sensor availability --- #}
+
+{% macro offline(label, device, block, flag, off) -%}
+{{ label }} readings were not recorded. The {{ device }} sensor reported {{ flag }}: false at all {{ off }} checkpoints that reported it, so the {{ block }} block is excluded from this report.
+{%- endmacro %}
+
+{% macro available_everywhere(labels, n) -%}
+{{ labels }} readings were available at all {{ n }} checkpoints reached.
+{%- endmacro %}
+
+{% macro available_some(label, n, reached) -%}
+{{ label }} readings were available at {{ n }} of the {{ reached }} checkpoints reached; the others were excluded:
+{%- endmacro %}
+
+{% macro excluded_item(reason, count) -%}
+- {{ reason }}: {{ count }}
+{%- endmacro %}
+
+{# --- the record's own contradictions (moved from the executive summary) --- #}
+
+{% macro conflict_lead() -%}
+The record's declared counts disagree with its own data:
+{%- endmacro %}
+
+{% macro count_conflict(declared, label, computed, held_in) -%}
+- The record declares {{ declared }} {{ label }}; its {{ held_in }} holds {{ computed }}.
+{%- endmacro %}
+
+{% macro warned_conflict(declared, warned, required, alerts, alerts_n, critical) -%}
+- The record declares {{ declared }} checkpoints in a warned state. {{ warned }} of the {{ required }} checkpoints carry a WARN result or a sensor warning{% if alerts_n %}, and {{ alerts }} sensor alert{{ "" if alerts_n == 1 else "s" }} {{ "was" if alerts_n == 1 else "were" }} logged during the run, {{ critical }} of them critical{% endif %}.
+{%- endmacro %}
+
+{% macro unreconciled() -%}
+Both figures are reported as recorded. They have not been reconciled.
 {%- endmacro %}

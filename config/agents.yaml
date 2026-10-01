@@ -9,7 +9,7 @@ provider:
   # For Claude, use these two lines instead. The model must accept temperature:
   # claude-sonnet-4-6 and claude-haiku-4-5 do; Opus 5, Sonnet 5 and Opus 4.7+ return HTTP 400.
   name: claude
-  model: claude-sonnet-4-6
+  model: claude-haiku-4-5
   temperature: 0.0                
   timeout_seconds: 60
   max_retries: 3                   # retries after a timeout, 429 or 5xx; other errors fail at once
@@ -24,9 +24,17 @@ agents:
     max_question_chars: 500        # a longer question is refused, never cut short
   b2_narrative:
     enabled: true
-    prose: true                    # false: the executive summary keeps code's fact order, no model call
+    prose: true                    # false: the summary keeps code's paragraph order, no model call
     prompt_version: narrative_v1
     max_attempts: 2                # model calls per executive summary, first try included
+    warning_fields:                # item notes: sensor warning code -> the reading it is about.
+      temperature_high: environment.temperature_c        # A code not listed is named by its label,
+      vibration_high: accelerometer.vibration_rms_g      # with no value
+      pm2_5_elevated: particulate.pm2_5
+    metric_names:                  # how a sentence names a measurement field; unlisted: its field name
+      temperature_c: temperature
+      vibration_rms_g: vibration RMS
+      pm2_5: PM2.5
   b3_action:
     enabled: true
     prose: false                   # section 8.4: no model call by default; true adds one opening sentence

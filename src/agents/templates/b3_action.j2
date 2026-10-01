@@ -1,21 +1,28 @@
-{#- B-3 action plan as readable text. Arguments are slot placeholders, lists
-    of them, or wording chosen by code (a category's name). The action itself
-    is always the finding's own recommended_action, carried verbatim. -#}
+{#- B-3 action plan as readable text, so every value has a span to cite.
+    Arguments are slot placeholders from b2_narrative.Writer, or lists of them
+    already joined. Arguments ending in _n are plain numbers used only to choose
+    wording, never printed. The action itself is always the finding's own
+    recommended_action, carried verbatim. The literal text holds no digits and
+    no number words. A line starting "- " is a bullet. -#}
 
 {% macro heading() -%}
-Actions, most urgent at the top:
+Actions, most urgent first:
 {%- endmacro %}
 
-{% macro action(category, severity, text, checkpoints, findings) -%}
-{{ category }}, severity {{ severity }}: {{ text }} Checkpoints: {{ checkpoints | join(", ") }}. Findings: {{ findings | join(", ") }}.
+{% macro action(priority, category, severity, text, count, count_n, checkpoints) -%}
+- Priority {{ priority }}, {{ category }}, severity {{ severity }}: {{ text }} {{ count }} finding{{ "" if count_n == 1 else "s" }} at {{ checkpoints }}.
 {%- endmacro %}
 
-{% macro unmapped(feature, checkpoints) -%}
-No action is configured for finding type {{ feature }}. Findings of this type were recorded at {{ checkpoints | join(", ") }} and require manual review.
+{% macro unmapped_heading() -%}
+Finding types with no configured action:
 {%- endmacro %}
 
-{% macro no_recorded_action(feature, checkpoints) -%}
-No recommended action is recorded for finding type {{ feature }} at {{ checkpoints | join(", ") }}; manual review is required.
+{% macro unmapped(feature, count, count_n, checkpoints) -%}
+- No action is configured for finding type {{ feature }}. {{ count }} finding{{ "" if count_n == 1 else "s" }} of this type {{ "was" if count_n == 1 else "were" }} recorded at {{ checkpoints }} and {{ "requires" if count_n == 1 else "require" }} manual review.
+{%- endmacro %}
+
+{% macro no_recorded_action(feature, count, count_n, checkpoints) -%}
+- No recommended action is recorded for finding type {{ feature }}. {{ count }} finding{{ "" if count_n == 1 else "s" }} of this type {{ "was" if count_n == 1 else "were" }} recorded at {{ checkpoints }} and {{ "requires" if count_n == 1 else "require" }} manual review.
 {%- endmacro %}
 
 {% macro no_findings(run) -%}

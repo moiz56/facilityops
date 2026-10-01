@@ -1,0 +1,36 @@
+{# Executive summary and coverage statement - B-2 (Milestone 2, section 8.3).
+
+   One page, straight after the cover: the summary, then the coverage
+   statement below it. Each renders only when its switch is on
+   (sections.executive_summary, sections.coverage_statement) and B-2 returned
+   text; with only one of them, that one renders alone under its own heading.
+   The next section starts on a new page, as every section does.
+
+   Each text sits in a framed block with the brand rule down its left side; the
+   summary's first paragraph, the run's verdict, reads as its lead. Lists print
+   as striped tables (_narrative.html.j2).
+
+   The text is B-2's verified output, every figure in it filled from the record
+   or its derived values; nothing here adds to it. Autoescaped. #}
+{% from "_narrative.html.j2" import blocks %}
+<section class="section executive-summary" id="executive-summary">
+
+  {% if executive_summary %}
+    <h2>Executive summary</h2>
+    <div class="narrative summary-narrative">
+      {{ blocks(executive_summary, "summary-points") }}
+    </div>
+  {% endif %}
+
+  {% if coverage_statement %}
+    {% if executive_summary %}
+      <h3 class="narrative-head">Coverage statement</h3>
+    {% else %}
+      <h2>Coverage statement</h2>
+    {% endif %}
+    <div class="narrative coverage-narrative">
+      {{ blocks(coverage_statement, "coverage-points") }}
+    </div>
+  {% endif %}
+
+</section>

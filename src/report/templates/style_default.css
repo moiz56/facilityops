@@ -802,3 +802,48 @@ h4.checkpoint-head {
   font-size: 6.5pt;
   color: #666;
 }
+
+/* B-2's section introduction and item note headings: bold and in the brand
+ * colour, so the generated prose stands apart from the recorded data. */
+.zone-intro h5,
+.item-note h5,
+.coverage-statement h5 {
+  font-weight: bold;
+  color: var(--primary-colour);
+}
+
+/* --- the agents' pages: executive summary, coverage statement, action plan ---
+ * B-2's and B-3's text set as part of the document, not beside it: each text
+ * in a framed block with the brand rule down its left side, its lists as
+ * striped one-column tables in the document's table style, and the action
+ * plan as a full table like the findings. */
+.narrative {
+  border-left: 2pt solid var(--primary-colour);
+  padding: 1mm 0 1mm 3.5mm;
+  margin: 0 0 8pt;
+}
+.narrative > p { margin: 0 0 5pt; text-indent: 0; }
+.narrative > p:last-child { margin-bottom: 0; }
+.summary-narrative > p:first-child { font-size: 1.1em; line-height: 1.4; }
+.narrative-head { color: var(--primary-colour); margin-top: 10pt; }
+
+.narrative-table { width: 100%; margin: 1pt 0 6pt; }
+.narrative-table td { padding: 1.2mm var(--cell-pad, 1mm); }
+.narrative-table tbody tr:nth-child(even) td { background-color: #f3f7fa; }
+
+.action-table,
+.unmapped-table { width: 100%; margin: 0 0 8pt; }
+.action-table { table-layout: fixed; }
+.action-table .col-priority { width: 10%; }
+.action-table .col-action { width: 34%; }
+.action-table .col-category { width: 13%; }
+.action-table .col-severity { width: 12%; }
+.action-table .col-count { width: 10%; }
+.action-table .col-checkpoints { width: 21%; }
+.action-table td,
+.unmapped-table td { vertical-align: top; }
+.action-table tbody tr:nth-child(even) td,
+.unmapped-table tbody tr:nth-child(even) td { background-color: #f3f7fa; }
+.action-priority { font-weight: bold; text-align: center; }
+.action-table .badge-small { display: inline-block; margin: 0 0.3em 0.2em 0; }
+.action-checkpoints { font-size: 0.9em; }

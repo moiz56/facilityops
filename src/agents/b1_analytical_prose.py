@@ -57,10 +57,31 @@ FACTS>>>
 Write one or two short sentences that answer the question in words and say
 what the facts below show.
 
+HOW IT SHOULD READ
+Write it the way a colleague would answer out loud, not as a caption:
+- Open with the answer itself, in the question's own terms: "Yes, that
+  checkpoint was completed in the latest run", "Temperature went past the
+  limit at several checkpoints", not "The facts show...".
+- Join the parts with ordinary linking words (and, but, while, so, with,
+  where, although) instead of stacking separate statements.
+- When the facts hold both kinds of result (values and readings that were
+  left out, checkpoints that failed and ones that were missed), say both in
+  one sentence, joined: "Most readings were recorded, but the particulate
+  ones could not be used".
+- End by pointing the reader to what follows and how it is laid out: "listed
+  below, run by run", "shown below with the reason for each".
+- Plain, calm words; no filler ("Here is", "Please see", "Based on the
+  data").
+
 HARD RULES (a reply that breaks one is rejected)
-1. Write no value from the facts: no run ids, checkpoint ids or names, no
-   readings, times or counts. Point to them instead: "listed below", "the run
-   below", "these checkpoints", "each run".
+1. Write no value and no name, whether it is in the facts or in the question:
+   no run ids, no checkpoint or zone ids or names, no readings, times or
+   counts. The question naming a checkpoint does not make its name yours to
+   write. Refer to it instead:
+     a checkpoint the question names -> "this checkpoint", "that checkpoint"
+     a zone the question names       -> "this zone", "that area"
+     a run or date                   -> "that run", "the latest run", "the runs asked about"
+     the rows                        -> "listed below", "shown below", "each run"
 2. Outside of that, never write any of these words, in any sense, even in an
    everyday phrase:
      zero one two three four five six seven eight nine ten eleven twelve
@@ -84,13 +105,24 @@ HARD RULES (a reply that breaks one is rejected)
 
 EXAMPLES
 Question: which checkpoints exceeded the temperature threshold in each run
-Reply: Temperature went past the threshold at the checkpoints listed below, run by run.
+Reply: Temperature went past the threshold at several checkpoints, and they are listed below run by run, with how far over each went.
 Question: which run recorded the highest temperature
-Reply: The run below recorded the highest temperature reading, at the checkpoint shown.
+Reply: The highest temperature came from the run shown below, and the checkpoint where it was read is given with it.
+(<checkpoint> and <zone> below stand for the names a question uses.)
+Question: what was the temperature at <checkpoint> in the latest run
+Reply: That checkpoint was read in the latest run, so its temperature is shown below along with when it was taken.
+Wrong: The temperature at <checkpoint> is shown below.   (it writes the name)
+Question: why is there no PM2.5 reading at <checkpoint>
+Reply: The particulate sensor at this checkpoint was not usable, so no reading was kept; the reason is given below.
+Question: which checkpoints failed and which were missed
+Reply: Some checkpoints were inspected and failed while others were never reached, so each kind is listed separately below.
+Question: which checkpoints are in <zone>
+Reply: That zone holds the checkpoints listed below, in the order the route takes them.
 
 BEFORE YOU REPLY
 Read your sentences word by word. If any word is in rule 2's list, has a
-digit or an underscore, or is copied from the facts, reword that sentence.
+digit or an underscore, or is copied from the facts or is a name from the
+question, reword that sentence with the words in rule 1.
 
 {feedback}REPLY
 The sentences only.
@@ -142,6 +174,8 @@ def check(reply: str) -> str:
         raise ProseError("the reply is empty")
     if "{" in text or "}" in text:
         raise ProseError("write plain sentences with no placeholders in braces; the facts carry every value")
+    if "<" in text or ">" in text:
+        raise ProseError("write plain sentences with no <placeholders>: write this checkpoint, that zone or that run")
     if len(text) > MAX_CHARS:
         raise ProseError(
             f"the reply is {len(text)} characters; write one or two short sentences, under {MAX_CHARS}, "
@@ -151,9 +185,20 @@ def check(reply: str) -> str:
     # a number or ordinal word, or an id like checkpoint_3.
     typed = list(dict.fromkeys(token for token, _, _ in extract_tokens(text, word_numbers=True)))
     if typed:
-        raise ProseError(
-            f"you wrote {', '.join(repr(t) for t in typed[:8])}. Write no values: point to the facts "
-            "(listed below, the run below, these checkpoints); instead of a number or ordinal word use a, "
-            "each, every, all, the earliest, the latest, the highest, or the next highest; name a reading in words"
-        )
+        # A name (an underscore, or letters with digits) needs different words from a number.
+        names = [t for t in typed if "_" in t or (re.search(r"[A-Za-z]", t) and re.search(r"\d", t))]
+        numbers = [t for t in typed if t not in names]
+        advice = []
+        if names:
+            advice.append(
+                f"{', '.join(repr(t) for t in names[:8])} is a name, even where the question uses it: "
+                "write this checkpoint, that zone, that run, or the checkpoints listed below instead"
+            )
+        if numbers:
+            advice.append(
+                f"{', '.join(repr(t) for t in numbers[:8])} is a value: point to the facts (listed below, "
+                "the run below); instead of a number or ordinal word use a, each, every, all, the earliest, "
+                "the latest, the highest or the next highest; name a reading in words"
+            )
+        raise ProseError("Write no values or names. " + "; ".join(advice))
     return text

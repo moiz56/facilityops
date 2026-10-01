@@ -1,0 +1,97 @@
+B-1 ANALYTICAL AGENT - SAMPLE QUESTIONS
+=======================================
+
+QUESTIONS
+---------
+
+D1  Threshold comparison (temperature against a 30 °C limit)
+    1. Which checkpoints went over the temperature limit in the latest run?    OK
+    2. How many checkpoints exceeded the temperature threshold in the first run?   OK
+    3. By how much did each checkpoint go over the limit in the runs on 19/8/2026?   OK
+    4. Which checkpoints stayed under the temperature limit in the first run, and by how much?   OK
+    5. On Aug 31st, which checkpoint ran hottest above the temperature limit in each run, and by how much?   OK
+    6. Which checkpoints went over the temperature limit on 10 September 2026?   ABSTAINED
+
+D2  Condition count (checkpoints that failed)
+    7. How many checkpoints failed in the latest run, out of how many?         OK
+    8. Which checkpoints were left out of the failure count in the latest run, and why?   OK
+    9. Which run had the most failed checkpoints?                              OK
+   10. Which checkpoints failed in each run?                                   OK
+   11. Which checkpoints have a result status fail for runs on 31st aug?       OK
+   12. Which checkpoints did not fail in the latest run?                       ABSTAINED
+
+D3  Proportion (share of checkpoints completed)
+   13. What percentage of checkpoints were completed in the latest run?        OK
+   14. Which run had the highest checkpoint completion rate?                   OK
+   15. What fraction of the checkpoints got done on the 19th of August?        OK
+   16. Can you break down the completion rate for every run, and how many stops each one had?   OK
+   17. On the very first run, which stops did the robot manage to finish?      OK
+   18. What is the failure rate for the checkpoints in the latest run?         ABSTAINED
+   19. What % of the route got covered on sept 10?                             ABSTAINED
+
+D4  Mean per zone (vibration, temperature, PM2.5)
+   20. Mean vibration per zone in the latest run?                              OK
+   21. Mean temperature in rowA_back in the latest run?                        OK
+   22. Mean vibration at a3_back in the latest run?                            OK
+       (a3_back sits inside a zone; the answer gives that zone's mean)
+   23. Mean temperature in row A back and row B back, per run?                 OK
+   24. Which zone is a3_back in, and what was its mean temperature in the latest run?   OK
+   25. Which checkpoints are in the rowA_back zone in the latest run?          OK
+   26. Overall mean temperature for the latest run?                            ABSTAINED
+   27. Mean humidity per zone in the latest run?                               ABSTAINED
+   28. Mean vibration in rowZ_back in the latest run?                          ABSTAINED
+
+D5  Maximum per zone
+   29. Which zone had the highest peak temperature in the latest run?          OK
+   30. Peak temperature in rowA_back in the latest run, and which checkpoint recorded it?   OK
+   31. Where was the highest vibration reading in the latest run: which zone and which checkpoint?   OK
+   32. Which zone had the lowest peak vibration in the latest run?             OK
+   33. Was a3_back the checkpoint with the highest temperature in its zone in the latest run?   OK
+   34. Which run had the highest peak temperature, and at which checkpoint?    OK
+   35. What was the lowest temperature reading in rowA_back in the latest run?   ABSTAINED
+
+D6  Top readings (vibration, temperature, PM2.5)
+   36. What were the five highest vibration readings in the latest run?        OK
+   37. Did a3_back make the top five for vibration in the latest run?          OK
+   38. Top five vibration and temperature readings in the latest run?          OK
+   39. Which three checkpoints had the highest vibration in the latest run?    OK
+   40. List the top ten vibration readings in the latest run.                  OK
+       (only the top five are held; the answer says so)
+   41. Where did a1_back and a3_back rank for temperature in the latest run?   OK
+   42. What were the five hottest checkpoints in rowA_back in the latest run?  ABSTAINED
+   43. Which checkpoint had the lowest vibration reading in the latest run?    ABSTAINED
+
+D7  Route change between the last two runs
+   44. Did the route change between the last two runs?                         OK
+   45. Which checkpoints are new in the latest run?                            OK
+   46. Was a3_back on the route in both of the last two runs?                  OK
+   47. How many checkpoints were added and how many removed in the latest run?   OK
+       (none may have changed; the answer still names both runs and the counts)
+   48. Which two runs does the route comparison cover?                         OK
+   49. Which checkpoints differ between the first and the third run?           ABSTAINED
+   50. Is the latest route better than the previous one?                       ABSTAINED
+
+D8  Dates of the runs
+   51. Over what period were the runs taken?                                   OK
+   52. Which day had the most runs?                                            OK
+   53. Which runs were taken on 19/8/2026, and at what time?                   OK
+   54. How often were inspection runs carried out?                             OK
+   55. Were any runs taken on a weekend?                                       OK
+   56. Which runs happened between 14 and 21 August 2026?                      OK
+   57. What was the longest gap between two runs?                              ABSTAINED
+   58. How many runs were carried out per week on average?                     ABSTAINED
+
+WHY THE ABSTENTIONS ARE CORRECT
+-------------------------------
+
+The agent abstains rather than guess when the records do not hold the answer:
+- a date with no runs (6, 19)
+- a zone or reading the records do not have (27, 28)
+- items that did not meet a condition (12)
+- a figure no derivation keeps: a failure rate (18), a mean of means (26),
+  the lowest reading (35, 43), rankings within a zone (42), gaps between runs
+  (57), runs per week (58)
+- comparing runs other than the last two (49)
+- a judgement such as better or worse (50)
+Questions about why something happened, or what will happen, are declined the
+same way.

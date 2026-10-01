@@ -18,6 +18,18 @@
   {% include "_cover.html.j2" %}
 {% endif %}
 
+{# B-2's summary, straight after the cover. Not one of 5.7's seven sections:
+   its switch is on only when config asks for it and B-2 gave text. #}
+{% if sections.executive_summary %}
+  {% include "_executive_summary.html.j2" %}
+{% endif %}
+
+{# B-3's action plan, straight after the summary page. Not one of 5.7's seven
+   sections: its switch is on only when config asks for it and B-3 gave a plan. #}
+{% if sections.action_plan %}
+  {% include "_action_plan.html.j2" %}
+{% endif %}
+
 {# Front matter, not one of 5.7's seven sections: it says where they are, so
    it renders whenever anything else does. #}
 {% include "_contents.html.j2" %}

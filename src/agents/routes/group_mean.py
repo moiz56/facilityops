@@ -10,7 +10,7 @@ runs the query.
 
 from typing import Sequence
 
-from agents.database import RUNS, d4_schema
+from agents.database_derivation import RUNS, d4_schema
 from agents.schema import DerivationConfig
 
 TYPE = "group_mean"
@@ -61,20 +61,20 @@ The question may be about one of these means or several.
 
 ZONES AND CHECKPOINTS
 The route has two levels:
-- A zone is an area of the route: a row of racks (rowA_back), a place (home),
-  or a stretch named like its checkpoint (checkpoint_1).
-- A checkpoint is one stop inside a zone: a single rack (a3_back). A zone
-  holds one checkpoint or several. When it holds one, the two often share a
-  name.
+- A zone is an area of the route.
+- A checkpoint is one stop inside a zone. A zone holds one checkpoint or
+  several. When it holds one, the two often share a name.
+<zone> and <checkpoint> below stand for any zone or checkpoint name; the
+real ones are listed under WHAT TO READ.
 Samples are tagged with the zone they were taken in, never with a checkpoint.
 So every mean here is a zone's mean, over all its readings; there is no mean
 of a checkpoint on its own.
-- A question about a zone ("in rowA_back", "per zone"): read d4_<instance> and
+- A question about a zone ("in <zone>", "per zone"): read d4_<instance> and
   filter d.group_key to the zones listed under WHAT TO READ, or group by it.
-- A question about a checkpoint ("at a3_back"): find its zone through
+- A question about a checkpoint ("at <checkpoint>"): find its zone through
   d4_<instance>_checkpoints, and answer with that zone's mean. Select the
   checkpoint and the zone, so the answer says whose mean it is.
-- A question about a zone's checkpoints ("which checkpoints are in rowA_back")
+- A question about a zone's checkpoints ("which checkpoints are in <zone>")
   is d4_<instance>_checkpoints alone.
 
 WHICH READING IS WHICH
@@ -130,8 +130,8 @@ SHAPES OF QUESTION
 - Per zone: select group_key. One zone: filter group_key. A checkpoint, or
   several: join d4_<instance>_checkpoints as above.
 - Per run: every group in each run named, ordered by run.
-- One checkpoint across runs ("the mean temperature at checkpoint_1 in each
-  run"): join d4_<instance>_checkpoints, filter c.checkpoint_id, order by run.
+- One checkpoint across runs ("the mean temperature at <checkpoint> in
+  each run"): join d4_<instance>_checkpoints, filter c.checkpoint_id, order by run.
 - Highest or lowest: see HOW MANY ROWS. Only within one mean; never compare
   means of different readings with each other.
 
@@ -148,7 +148,7 @@ Fetch exactly as many rows as the question asks for, no more.
                     WHERE d2.run_id = d.run_id AND d2.status = 'OK'
                     ORDER BY d2.mean DESC LIMIT 1)
   - The run with the highest mean in one zone ("which run was hottest at
-    checkpoint_1"): the same subquery with d2.group_key = d.group_key AND
+    <checkpoint>"): the same subquery with d2.group_key = d.group_key AND
     d2.run_id IN (<run_ids>) instead of d2.run_id = d.run_id.
   - With several means in a UNION ALL, each SELECT gets its own subquery on
     its own table.
@@ -177,27 +177,27 @@ RULES FOR THE QUERY
   run_order, instance, position.
 
 EXAMPLES
-The mean in one zone, rowA_back, in each run:
+The mean in one zone, in each run:
   SELECT r.run_id, d.group_key, d.mean, d.reason, d.path AS path_d, r.path AS path_r
   FROM d4_<instance> d JOIN runs r ON r.run_id = d.run_id
-  WHERE d.run_id IN (<run_ids>) AND (d.group_key = 'rowA_back' OR d.group_key IS NULL)
+  WHERE d.run_id IN (<run_ids>) AND (d.group_key = '<zone>' OR d.group_key IS NULL)
   ORDER BY r.run_order, d.position
-Which checkpoints are in rowA_back:
+Which checkpoints are in <zone>:
   SELECT r.run_id, c.group_key, c.checkpoint_id, c.checkpoint_name, c.path AS path_c, r.path AS path_r
   FROM d4_<instance>_checkpoints c JOIN runs r ON r.run_id = c.run_id
-  WHERE c.run_id IN (<run_ids>) AND c.group_key = 'rowA_back'
+  WHERE c.run_id IN (<run_ids>) AND c.group_key = '<zone>'
   ORDER BY r.run_order, c.position
 The mean per zone:
   SELECT r.run_id, d.group_key, d.mean, d.reason, d.path AS path_d, r.path AS path_r
   FROM d4_<instance> d JOIN runs r ON r.run_id = d.run_id
   WHERE d.run_id IN (<run_ids>)
   ORDER BY r.run_order, d.position
-The mean at a3_back, in each run (its zone's mean):
+The mean at one checkpoint, in each run (its zone's mean):
   SELECT r.run_id, c.checkpoint_id, d.group_key, d.mean, d.reason,
          c.path AS path_c, d.path AS path_d, r.path AS path_r
   FROM d4_<instance> d JOIN runs r ON r.run_id = d.run_id
   JOIN d4_<instance>_checkpoints c ON c.run_id = d.run_id AND c.group_key = d.group_key
-  WHERE d.run_id IN (<run_ids>) AND c.checkpoint_id IN ('a3_back')
+  WHERE d.run_id IN (<run_ids>) AND c.checkpoint_id IN ('<checkpoint>')
   ORDER BY r.run_order, d.position
 Two means per zone:
   SELECT r.run_id, r.run_order, d.instance, d.position, d.group_key, d.mean, d.reason,

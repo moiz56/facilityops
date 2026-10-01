@@ -24,6 +24,7 @@
   {%- endif -%}
 {%- endmacro %}
 
+{% from "_narrative.html.j2" import blocks %}
 <section class="section checkpoints" id="checkpoints">
 
   <h2>Checkpoints</h2>
@@ -34,6 +35,15 @@
      calls zone the grouping key; a run can put several checkpoints in one zone
      or one in each. styles.css keeps a zone header with the group it heads. #}
   <h3 class="zone-head">{{ group.zone }}</h3>
+
+  {# B-2's section introduction for this zone, when sections.section_intros
+     is on and B-2 gave one. A zone without one prints nothing extra. #}
+  {% if group.zone in section_intros %}
+    <div class="zone-intro">
+      <h5>Section introduction</h5>
+      {{ blocks(section_intros[group.zone], "zone-intro-points") }}
+    </div>
+  {% endif %}
 
   {% for view in group.checkpoints %}
   {% set point = view.checkpoint %}
@@ -55,6 +65,15 @@
       <span class="badge badge-small badge-{{ point.status | status_style }}">{{ point.status }}</span>
       <span class="badge badge-small badge-{{ point.result_status | verdict_style }}">{{ point.result_status }}</span>
     </p>
+
+    {# B-2's item note, when sections.item_notes is on and B-2 gave one. #}
+    {% set note = item_note(point) %}
+    {% if note %}
+      <div class="item-note">
+        <h5>Item note</h5>
+        <p>{{ note }}</p>
+      </div>
+    {% endif %}
 
     {# Every absence stated because detect_gaps raised a gap names that gap, so
        a reader can match the sentence to the manifest entry behind it (4.4). #}

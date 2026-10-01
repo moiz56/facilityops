@@ -1,0 +1,52 @@
+# B-2's derivation configuration.
+#
+# B-2 is called for one run, and derives over that run alone with its own set,
+# read from here. B-1 reads config/derivations.yaml and builds its own
+# database; the two never run together, so nothing here changes B-1. The code
+# is the same (agents.derivation); only the instances differ.
+#
+# The settings outside `derivations` mean what they mean in derivations.yaml,
+# and are kept the same so both agents judge eligibility and format values alike.
+
+derivation_set_version: "1.0"
+extended_record_version: "1.0"    # version of the extended record's serialised shape
+
+significant_figures: 4            # raw numbers are rounded to the field's report.yaml decimals;
+                                   # this is used only for names with no decimals entry
+
+eligibility:                       # the values the section 3.2 rule compares against
+  completed_status: COMPLETED      # condition 1: a checkpoint with any other status contributes nothing
+  connected_status: connected      # condition 2: sensor status, and a sample's own status
+  status_exempt_fields: [status]   # checkpoint fields condition 1 is not applied to
+
+formats:
+  timestamp: "%Y-%m-%dT%H:%M:%S%z" # e.g. 2026-07-28T14:41:20-0700, in the recorded offset
+  date: "{day} {month} {year}"     # e.g. 28 July 2026
+  sample_id: "sample_{index:04d}"  # samples have no id field, so they are named by position
+  sensor_alert_id: "sensor_alert_{index:04d}"   # same for sensor alerts
+  computed_at: "%Y-%m-%dT%H:%M:%SZ" # extended record's computed_at, in UTC
+
+conditions: {}                     # B-2 uses no condition_count or proportion
+
+derivations:
+  # D4 over the run's telemetry samples, per zone: the zone means the
+  # executive summary's measurement paragraph and the section introductions
+  # state. n is how many samples the mean used. A sample is judged by its
+  # nearest checkpoint (section 3.2), so samples near a MISSED checkpoint, or
+  # one whose device was off, are left out. The summary's measurement uses the
+  # first group_mean instance listed here.
+  group_mean_vibration_rms_g:
+    type: group_mean
+    field_path: accelerometer.vibration_rms_g
+    source: samples
+    group_by: zone
+  group_mean_temperature_c:
+    type: group_mean
+    field_path: environment.temperature_c
+    source: samples
+    group_by: zone
+  group_mean_pm2_5:
+    type: group_mean
+    field_path: particulate.pm2_5
+    source: samples
+    group_by: zone

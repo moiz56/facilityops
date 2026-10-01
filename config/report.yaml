@@ -26,6 +26,7 @@ sensor:
     sps30_ok: particulate
 
 units:                             # measurement field -> the unit it is printed in
+  temperature_c: "°C"
 
 decimals: # measurement field -> decimal places it prints to
   temperature_c: 2
@@ -59,6 +60,16 @@ sections:
   zone_telemetry: true
   checkpoints: true
   summary: true
+  executive_summary: true         # true: B-2's executive summary goes after the cover. Optional, off
+                                   # when absent; reads config/b2_derivations.yaml and config/agents.yaml
+  section_intros: true            # true: B-2's section introduction under each zone heading in
+                                   # Checkpoints. Optional, off when absent; reads the same files
+  item_notes: true               # true: B-2's item note at the top of each checkpoint's block.
+                                   # Optional, off when absent; reads the same files
+  coverage_statement: true         # true: B-2's coverage statement below the executive summary, on
+                                   # its page. Optional, off when absent; reads the same files
+  action_plan: true                # true: B-3's action plan as its own section after the summary page.
+                                   # Optional, off when absent; reads config/action_mapping.yaml too
 
 branding:
   stylesheet: styles.css           # a file in src/report/templates/: styles.css or style_default.css

@@ -515,11 +515,18 @@ def b2_config(agents: dict) -> B2Config:
     if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or temperature < 0:
         raise ConfigError("setting 'provider.temperature' must be a number, 0 or more")
 
+    tables = {}
+    for key in ("warning_fields", "metric_names"):
+        tables[key] = entry.get(key) or {}
+        if not isinstance(tables[key], dict) or not all(isinstance(v, str) for v in tables[key].values()):
+            raise ConfigError(f"setting 'agents.b2_narrative.{key}' must be a table of text values")
+
     return B2Config(
         prompt_version=str(setting(b2, "b2", "prompt_version")),
         max_attempts=number_setting(b2, "b2", "max_attempts", whole=True),
         temperature=float(temperature),
         **switches,
+        **tables,
     )
 
 
@@ -557,6 +564,126 @@ def b3_config(agents: dict, mapping: dict) -> B3Config:
         severity_rank=tables["severity_rank"],
         **switches,
     )
+
+
+def eligibility_by_run(records: Sequence[Record], eligibility: Eligibility, config: DerivationConfig) -> dict:
+    """Eligibility regrouped for reading: run -> zone -> checkpoint -> block.
+
+    Only the layout changes; every value, reason and count is eligibility's.
+    Each block is {"included": [...], "excluded": [...]}:
+      included  one reading per visit or sample, all the block's kept fields
+                together, e.g. accel_x, accel_y and accel_z in one entry
+      excluded  one entry per reason, naming the fields it left out and how
+                many readings each (samples also give their zone)
+    A checkpoint sits under its own zone. Its reading is under "checkpoint",
+    the samples nearest it under "samples" (each sample keeps its own zone),
+    and "evidence" holds the evidence paths as recorded: its images, annotated
+    images, and the images of findings made there. Anything tied to no
+    checkpoint in the run (a sample without one, a finding, a sensor alert) is
+    under the run's "unassigned", by kind.
+
+    "path" is where a thing sits in the extended record, as slots.resolve
+    reads it: a checkpoint's is records[i].checkpoints[j] (its first visit);
+    a reading's is the object its fields are on, so a value is that path plus
+    "." and the field, e.g. records[i].checkpoints[j].sensor.environment +
+    ".temperature_c"; an image's is the image itself. An excluded entry has
+    no value to cite; its checkpoint's path covers it.
+    """
+    runs: dict = {}
+    run_index = {record.run_id: i for i, record in enumerate(records)}
+    where: dict = {}     # (run_id, checkpoint_id) -> its entry
+    visits: dict = {}    # (run_id, checkpoint_id) -> [(j, checkpoint)], one per visit
+    samples: dict = {}   # (run_id, sample_id) -> (nearest checkpoint, the sample's path)
+    for i, record in enumerate(records):
+        zones: dict = {}
+        for j, cp in enumerate(record.checkpoints):
+            at = f"records[{i}].checkpoints[{j}]"
+            visits.setdefault((record.run_id, cp.checkpoint_id), []).append((j, cp))
+            entry = where.get((record.run_id, cp.checkpoint_id))
+            if entry is None:   # a checkpoint visited twice is one entry, under its first zone
+                position = sum(len(z["checkpoints"]) for z in zones.values())   # route order, first visit
+                entry = where[(record.run_id, cp.checkpoint_id)] = {
+                    "checkpoint_name": cp.checkpoint_name, "position": position, "path": at,
+                    "evidence": {"evidence_images": [], "annotated_images": [], "findings": []},
+                    "checkpoint": {}, "samples": {},
+                }
+                zones.setdefault(cp.zone, {"checkpoints": {}})["checkpoints"][cp.checkpoint_id] = entry
+            evidence = entry["evidence"]
+            found = [
+                *({"finding_id": f.finding_id, "image": f.evidence_image,
+                   "path": f"{at}.detections[{k}].evidence_image"} for k, f in enumerate(cp.detections)),
+                *({"finding_id": f.finding_id, "image": f.evidence_image,
+                   "path": f"records[{i}].findings[{k}].evidence_image"}
+                  for k, f in enumerate(record.findings) if f.checkpoint_id == cp.checkpoint_id),
+            ]
+            for key, items in (
+                ("evidence_images", [{"image": img, "path": f"{at}.evidence_images[{k}]"}
+                                     for k, img in enumerate(cp.evidence_images)]),
+                ("annotated_images", [{"image": img, "path": f"{at}.annotated_images[{k}]"}
+                                      for k, img in enumerate(cp.annotated_images)]),
+                ("findings", [f for f in found if f["image"]]),
+            ):
+                seen = {x["image"] for x in evidence[key]}
+                evidence[key] += [x for x in items if x["image"] not in seen]
+        runs[record.run_id] = {"path": f"records[{i}]", "zones": zones, "unassigned": {}}
+        for k, sample in enumerate(record.sensor_samples):
+            samples[(record.run_id, config.sample_id_format.format(index=k))] = (
+                sample.nearest_checkpoint_id, f"records[{i}].sensor_samples[{k}].sensor",
+            )
+
+    def block_of(run_id: str, kind: str, cid: str | None, block: str) -> dict:
+        entry = where.get((run_id, cid)) if kind in ("checkpoint", "sample") else None
+        if entry is not None:
+            place = entry["checkpoint" if kind == "checkpoint" else "samples"]
+        else:
+            place = runs[run_id]["unassigned"].setdefault(kind, {})
+        return place.setdefault(block, {"included": [], "excluded": []})
+
+    def reading_path(v: EligibleValue, block: str, nth: int) -> str | None:
+        """The object v's field is on. A checkpoint visited more than once is
+        matched to its visit by timestamp; the nth reading at one timestamp
+        is the nth visit that has it."""
+        if v.kind == "sample":
+            return f"{samples[(v.run_id, v.source_id)][1]}.{block}"
+        if v.kind != "checkpoint":
+            return None
+        seen = visits[(v.run_id, v.source_id)]
+        stamp = (lambda cp: cp.timestamp) if block in RECORD_SCOPES else (
+            lambda cp: cp.sensor.timestamp if cp.sensor else None)
+        matches = [j for j, cp in seen if len(seen) == 1 or stamp(cp) == v.timestamp]
+        if nth >= len(matches):
+            return None
+        at = f"records[{run_index[v.run_id]}].checkpoints[{matches[nth]}]"
+        return at if block in RECORD_SCOPES else f"{at}.sensor.{block}"
+
+    # The fields of one reading share its source and timestamp. A checkpoint
+    # visited twice at one time gives two readings, filled in turn.
+    readings: dict = {}
+    for field_path, (values, exclusions) in eligibility.items():
+        block, _, name = field_path.partition(".")
+        for v in values:
+            same = readings.setdefault((v.run_id, v.kind, v.source_id, v.timestamp, block), [])
+            reading = next((r for r in same if name not in r), None)
+            if reading is None:
+                reading = {"source_id": v.source_id, "zone": v.zone, "timestamp": v.timestamp, "stale": v.stale,
+                           "path": reading_path(v, block, len(same))}
+                same.append(reading)
+                cid = samples[(v.run_id, v.source_id)][0] if v.kind == "sample" else v.source_id
+                block_of(v.run_id, v.kind, cid, block)["included"].append(reading)
+            reading[name] = v.value
+
+        for e in exclusions:
+            excluded = block_of(e.run_id, e.kind, e.scope, block)["excluded"]
+            entry = {"reason": e.reason, "count": e.count}
+            if e.kind == "sample":
+                entry["zone"] = e.zone
+            same = [x for x in excluded if all(x[k] == entry[k] for k in entry)]
+            if same:
+                same[0]["fields"].append(name)
+            else:
+                excluded.append({**entry, "fields": [name]})
+
+    return {"runs": runs}
 
 
 # Printing
@@ -695,7 +822,16 @@ def print_b1_trace(trace: dict) -> None:
                 print("     " + call["summary_sql"].replace("\n", "\n     "))
 
     print(f"\ntrace: {trace['question']!r}")
-    print("\n1. router")
+    print("\n1. retrieval router")
+    print_calls(trace["retrieval"]["calls"])
+    if trace["retrieval"]["result"]:
+        result = trace["retrieval"]["result"]
+        print(f"   retrieval: {result['kind']} ({result['reason']})")
+    if not trace["router"]["kind"]:
+        print(f"\nanswer from: {trace['answer_from']}")
+        return
+
+    print(f"\n2. {trace['router']['kind']} router")
     print_calls(trace["router"]["calls"])
     route = trace["router"]["route"]
     if route:
@@ -705,17 +841,21 @@ def print_b1_trace(trace: dict) -> None:
             print(f"   route: runs {route['run_ids']}")
             print(f"          zones {route.get('zones') or '(any)'}")
             print(f"          checkpoints {route['checkpoints'] or '(any)'}")
-            print(f"          derivations {route['derivations']}")
-
-    for k, step in enumerate(trace["sql_writer"], start=2):
-        print(f"\n{k}. sql writer: {step['route']} ({', '.join(step['instances'])})")
+            if "derivations" in route:
+                print(f"          derivations {route['derivations']}")
+            else:
+                print(f"          fields {route['fields'] or '(all)'}")
+                print(f"          tables {route['tables']}")
+    for k, step in enumerate(trace["sql_writer"], start=3):
+        instances = f" ({', '.join(step['instances'])})" if step["instances"] else ""
+        print(f"\n{k}. sql writer: {step['route']}{instances}")
         print_calls(step["calls"])
         if step["values"]:
             print("   values the query returned, and where each is in the records:")
             for slot_id, value in step["values"].items():
                 print(f"     {slot_id:<26} {str(value)!r:<30} {step['slots'].get(slot_id, '')}")
 
-    k = len(trace["sql_writer"]) + 2
+    k = len(trace["sql_writer"]) + 3
     print(f"\n{k}. prose writer")
     print_calls(trace["prose"]["calls"])
     if trace["prose"]["lead"]:

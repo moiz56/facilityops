@@ -24,6 +24,9 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from agents.b2_narrative import run_coverage, run_item_notes, run_section_intros, run_summary
+from agents.b3_action import run_plan
+from agents.utils import load_env
 from common import DATA_DIR, OUTPUT_DIR, PROJECT_ROOT, configure_logging, ensure_runtime_dirs
 from common.loader import RecordParseError, load_record
 from common.paths import (
@@ -39,6 +42,14 @@ from report.render import render_document
 
 # Named explicitly: run as "python -m report.cli", __name__ would be "__main__".
 logger = logging.getLogger("report.cli")
+
+#: What B-2 reads besides report.yaml, when any of its sections is on:
+#: executive_summary, section_intros, item_notes, coverage_statement.
+#: B-2 has its own derivation set; config/derivations.yaml is B-1's.
+DERIVATIONS_CONFIG = PROJECT_ROOT / "config" / "b2_derivations.yaml"
+AGENTS_CONFIG = PROJECT_ROOT / "config" / "agents.yaml"
+ACTION_MAPPING_CONFIG = PROJECT_ROOT / "config" / "action_mapping.yaml"   # B-3's, when sections.action_plan is on
+ENV_FILE = PROJECT_ROOT / ".env"   # the provider's API key
 
 @dataclass(frozen=True)
 class Artifacts:
@@ -87,11 +98,20 @@ def run_pipeline(
     config = load_config(config_path)
     provenance = stamp(record.run_id, config)
 
+    # executive summary, only when config asks for it: B-2 writes it from this
+    # run alone, and render puts it straight after the cover.
+    summary = executive_summary(record, config) if config["sections"].get("executive_summary") else None
+    intros = section_intros(record, config) if config["sections"].get("section_intros") else None
+    notes = item_notes(record, config) if config["sections"].get("item_notes") else None
+    statement = coverage_statement(record, config, evidence_root) if config["sections"].get("coverage_statement") else None
+    actions = action_plan(record, config) if config["sections"].get("action_plan") else None
+
     # render. render_document is render_pdf plus the page numbers it measured
     # while laying the document out; the manifest needs them and nothing else
     # can know them (4.4).
     pdf_path, pages = render_document(
-        record, gaps, derived, grids, config, output_dir, provenance,
+        record, gaps, derived, grids, config, output_dir, provenance, summary, intros, notes,
+        statement, actions,
     )
 
     # manifest. The same config path the render used, so the version stamp and
@@ -104,6 +124,106 @@ def run_pipeline(
         record=record, images=images, grids=grids, gaps=gaps,
         derived=derived, pdf_path=pdf_path, manifest=manifest,
     )
+
+
+def executive_summary(record: Record, config: dict) -> str | None:
+    """B-2's executive summary text for this run, or None when there is none.
+
+    None when B-2 is disabled in agents.yaml, refused its text, or failed:
+    the report then renders without the section rather than with an empty one.
+    """
+    load_env(ENV_FILE)
+    try:
+        _, result = run_summary(record, config, load_config(DERIVATIONS_CONFIG), load_config(AGENTS_CONFIG))
+    except ValueError as error:
+        logger.error("executive summary not written: %s", error)
+        return None
+    if result is None:
+        logger.warning("executive summary not written: B-2 is disabled in agents.yaml")
+        return None
+    logger.info("executive summary: %s", result["status"])
+    return result["output"]["text"] if result["output"] else None
+
+
+def section_intros(record: Record, config: dict) -> dict[str, str] | None:
+    """B-2's section introduction text per zone, or None when there is none.
+
+    A zone whose introduction B-2 refused is left out, so its heading renders
+    with no introduction rather than an empty one.
+    """
+    load_env(ENV_FILE)
+    try:
+        _, intros = run_section_intros(record, config, load_config(DERIVATIONS_CONFIG), load_config(AGENTS_CONFIG))
+    except ValueError as error:
+        logger.error("section introductions not written: %s", error)
+        return None
+    if intros is None:
+        logger.warning("section introductions not written: B-2 is disabled in agents.yaml")
+        return None
+    texts = {zone: result["output"]["text"] for zone, result in intros.items() if result["output"]}
+    logger.info("section introductions: %d of %d zones", len(texts), len(intros))
+    return texts
+
+
+def item_notes(record: Record, config: dict) -> list[str | None] | None:
+    """B-2's item note text per checkpoint, in record order, or None when there are none.
+
+    A checkpoint whose note B-2 refused gets None, so its block renders with no
+    note rather than an empty one.
+    """
+    try:
+        _, notes = run_item_notes(record, config, load_config(DERIVATIONS_CONFIG), load_config(AGENTS_CONFIG))
+    except ValueError as error:
+        logger.error("item notes not written: %s", error)
+        return None
+    if notes is None:
+        logger.warning("item notes not written: B-2 is disabled in agents.yaml")
+        return None
+    texts = [result["output"]["text"] if result["output"] else None for result in notes]
+    logger.info("item notes: %d of %d checkpoints", sum(1 for t in texts if t), len(texts))
+    return texts
+
+
+def coverage_statement(record: Record, config: dict, evidence_root: Path) -> str | None:
+    """B-2's coverage statement text for this run, or None when there is none.
+
+    Images resolve against the same evidence root the report renders from.
+    """
+    try:
+        _, result = run_coverage(
+            record, config, load_config(DERIVATIONS_CONFIG), load_config(AGENTS_CONFIG), evidence_root,
+        )
+    except ValueError as error:
+        logger.error("coverage statement not written: %s", error)
+        return None
+    if result is None:
+        logger.warning("coverage statement not written: B-2 is disabled in agents.yaml")
+        return None
+    logger.info("coverage statement: %s", result["status"])
+    return result["output"]["text"] if result["output"] else None
+
+
+def action_plan(record: Record, config: dict) -> dict | None:
+    """B-3's action plan for this run (its output body: actions, unmapped), or None.
+
+    The report draws it as tables from these fields, which B-3 verified along
+    with its text. None when B-3 is disabled, refused its output, or failed:
+    the report then renders without the section rather than with an empty one.
+    """
+    load_env(ENV_FILE)      # only used if B-3's prose is switched on
+    try:
+        _, result = run_plan(
+            record, config, load_config(DERIVATIONS_CONFIG), load_config(AGENTS_CONFIG),
+            load_config(ACTION_MAPPING_CONFIG),
+        )
+    except ValueError as error:
+        logger.error("action plan not written: %s", error)
+        return None
+    if result is None:
+        logger.warning("action plan not written: B-3 is disabled in agents.yaml")
+        return None
+    logger.info("action plan: %s", result["status"])
+    return result["output"]
 
 
 def report_anomalies(record: Record) -> None:

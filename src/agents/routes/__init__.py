@@ -1,6 +1,6 @@
 """B-1's SQL writer prompts, one module per derivation type.
 
-The router (b1_analytical_router) names the derivation instances a question
+The router (b1_analytical_router_derived) names the derivation instances a question
 is about; b1_analytical then takes each instance's type to its module here and
 asks the model for one SELECT with that module's PROMPT.
 
@@ -12,7 +12,7 @@ Every module has TYPE and PROMPT, and:
   PER_RUN = False when its output is one for all runs (D7, D8), so its rows
       have no run_id
 
-The router offers every type in PROMPTS (b1_analytical_router.ROUTED_TYPES).
+The router offers every type in PROMPTS (b1_analytical_router_derived.ROUTED_TYPES).
 """
 
 from agents.routes import (

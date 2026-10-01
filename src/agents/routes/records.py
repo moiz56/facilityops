@@ -11,7 +11,7 @@ The SQL writer asks the model for one SELECT over runs and the rec_ tables
 only. Nothing here calls the model or runs the query.
 """
 
-from agents.database import RECORDS, RUNS
+from agents.database_derivation import RECORDS, RUNS
 
 TYPE = "records"   # the name the router gives this route; not a derivations.yaml type
 TABLES = (RUNS + RECORDS).strip()
@@ -117,11 +117,11 @@ RULES FOR THE QUERY
 - Order by r.run_order, then the table's position.
 
 EXAMPLES
-What happened at checkpoint_3:
+What happened at one checkpoint:
   SELECT r.run_id, c.checkpoint_id, c.status, c.result_status, c.observed, c.notes,
          c.path AS path_c, r.path AS path_r
   FROM rec_checkpoints c JOIN runs r ON r.run_id = c.run_id
-  WHERE c.run_id IN (<run_ids>) AND c.checkpoint_id IN ('checkpoint_3')
+  WHERE c.run_id IN (<run_ids>) AND c.checkpoint_id IN ('<checkpoint>')
   ORDER BY r.run_order, c.position
 Which findings need human review:
   SELECT r.run_id, f.finding_id, f.checkpoint_id, f.feature, f.description,
@@ -129,7 +129,7 @@ Which findings need human review:
   FROM rec_findings f JOIN runs r ON r.run_id = f.run_id
   WHERE f.run_id IN (<run_ids>) AND f.status = 'abstained'
   ORDER BY r.run_order, f.position
-The temperature reading at checkpoint_3, or why there is none:
+The temperature reading at one checkpoint, or why there is none:
   SELECT r.run_id, c.checkpoint_id, g.value, x.reason,
          c.path AS path_c, g.path AS path_g, x.path AS path_x, r.path AS path_r
   FROM rec_checkpoints c JOIN runs r ON r.run_id = c.run_id
@@ -137,7 +137,7 @@ The temperature reading at checkpoint_3, or why there is none:
        AND g.source_id = c.checkpoint_id AND g.field_path = 'environment.temperature_c'
   LEFT JOIN rec_exclusions x ON x.run_id = c.run_id AND x.block = 'environment'
        AND x.scope IN (c.checkpoint_id, '__run__')
-  WHERE c.run_id IN (<run_ids>) AND c.checkpoint_id IN ('checkpoint_3')
+  WHERE c.run_id IN (<run_ids>) AND c.checkpoint_id IN ('<checkpoint>')
   ORDER BY r.run_order, c.position
 How the run ended:
   SELECT r.run_id, r.run_status, r.final_status, r.end_time, r.duration, r.path AS path_r

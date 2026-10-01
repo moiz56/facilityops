@@ -1,10 +1,14 @@
-# B-3 action mapping (section 8.4).
+# B-3 action mapping (Milestone 2 brief, section 8.4).
 #
-# A finding's feature maps to a category. B-3 carries the finding's own
-# recommended_action verbatim; it never writes one. A feature not listed under
-# `features` is unmapped: B-3 says so and invents nothing. The agent never
-# decides a mapping - add one here. Features that sound alike are still
-# different features (airflow_obstruction is not blocked_airflow_path).
+# Taken from the brief's mapping table; adjust when the client sends the
+# confirmed file. A finding's feature maps to a category. B-3 carries the
+# finding's own recommended_action verbatim; it never writes one. A feature not
+# listed under `features` is unmapped: B-3 says so and invents nothing. The
+# agent never decides a mapping - add one here.
+#
+# airflow_obstruction is deliberately absent. It sounds like
+# blocked_airflow_path but is a different feature, and the brief says it is the
+# unmapped case: do not map it to airflow.
 
 features:                          # finding feature -> category
   general_condition: review_evidence
@@ -12,10 +16,10 @@ features:                          # finding feature -> category
   blocked_airflow_path: airflow
   sensor_threshold_warning: sensor_review
 
-categories:                        # category -> rank within a severity, 1 first (TUNABLE)
-  airflow: 1
-  review_evidence: 2
-  sensor_review: 3
+categories:                        # category -> rank within a severity, 1 first.
+  airflow: 1                       # TUNABLE: the brief says the ranks come from config
+  review_evidence: 2               # but does not give them; this order is a placeholder
+  sensor_review: 3                 # until the client confirms one
   recapture: 4
 
 severity_rank:                     # section 8.4: fail = 1, warning = 2, info = 3

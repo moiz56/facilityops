@@ -52,6 +52,52 @@
     <p class="absent-strong">No answer is shown. {{ reason }}</p>
   {% endif %}
 
+  {# The images the answer lists, drawn as the report draws a checkpoint's
+     evidence: one grid per run and checkpoint, the RGB of a view above its
+     thermal. Only the images the answer lists, never the checkpoint's others. #}
+  {% if evidence %}
+    <h2>Evidence</h2>
+    {% for group in evidence %}
+      <table class="evidence-grid">
+        <thead>
+          <tr>
+            <th colspan="{{ group.columns }}">
+              {{ group.checkpoint_name or "No checkpoint" }} - run {{ group.run_id }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in group.cells | batch(group.columns) %}
+            <tr>
+              {% for cell in row %}
+                <td class="evidence-cell">
+                  {% if cell.view %}
+                    <span class="view-label">{{ cell.view }}</span>
+                  {% endif %}
+                  {% if cell.rgb %}
+                    {% if cell.rgb.src %}
+                      <img class="evidence-rgb" src="{{ cell.rgb.src }}" alt="{{ cell.view or group.checkpoint_id }}">
+                    {% else %}
+                      <span class="image-absent">{{ cell.rgb.absent }}</span>
+                    {% endif %}
+                  {% endif %}
+                  {% if cell.thermal %}
+                    <span class="modality">Thermal</span>
+                    {% if cell.thermal.src %}
+                      <img class="evidence-thermal" src="{{ cell.thermal.src }}" alt="{{ cell.view or group.checkpoint_id }} thermal">
+                    {% else %}
+                      <span class="thermal-absent">{{ cell.thermal.absent }}</span>
+                    {% endif %}
+                  {% endif %}
+                </td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endfor %}
+  {% endif %}
+
   {% if citations %}
     <h2>Where each value comes from</h2>
     <p class="lede">

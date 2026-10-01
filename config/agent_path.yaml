@@ -10,4 +10,7 @@ agent:
     - "*/records/run.json"
   extended_record: output/extended_record.json   # where --all writes the extended record
   database: output/b1_database.sqlite   # B-1's database, kept between runs; rebuilt when what it is built from changes
+  lookup_database: output/b1_lookup_database.sqlite   # B-1's lookup database, built from eligibility; kept the same way
   b1_answers: output/b1_answers          # --ask writes one PDF per question here
+  b2_output: output/b2                   # --summary writes <run_id>_extended_record.json here
+  evidence_root: data                    # where evidence image paths resolve (path_prefix stripped), as the report's --evidence-root

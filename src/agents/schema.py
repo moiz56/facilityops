@@ -6,7 +6,7 @@ common/schema.py. These are the types the agent layer builds on top of them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
@@ -95,11 +95,15 @@ class DerivedValues:
               exclusion. Every run has a key, oldest first; [] when nothing was left out
     stale:    {run_id, scope, block, affected_derivations} per stale input used,
               for every run, oldest first
+    run_values: run_id -> the values B-2 states that no derivation gives
+              (b2_narrative.run_values). Empty until B-2 adds its run's entry;
+              not part of the serialised shape.
     """
 
     values: dict[str, dict | list[dict]]
     excluded: dict[str, list[dict]]
     stale: list[dict]
+    run_values: dict[str, dict] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -114,8 +118,8 @@ class ExtendedRecord:
     config_hash: str
 
     def to_dict(self) -> dict:
-        """The serialised shape in section 5.2."""
-        return {
+        """The serialised shape in section 5.2, plus run_values once B-2 has added any."""
+        shape = {
             "extended_record_version": self.extended_record_version,
             "computed_at": self.computed_at,
             "derivation_set_version": self.derivation_set_version,
@@ -125,6 +129,9 @@ class ExtendedRecord:
             "excluded": self.derived.excluded,
             "stale": self.derived.stale,
         }
+        if self.derived.run_values:
+            shape["run_values"] = self.derived.run_values
+        return shape
 
 
 @dataclass(frozen=True)
@@ -269,7 +276,8 @@ class B1Config:
 class B2Config:
     """Every setting B-2 needs, read from agents.yaml once (utils.b2_config).
 
-    From agents.b2_narrative: enabled, prose, prompt_version, max_attempts
+    From agents.b2_narrative: enabled, prose, prompt_version, max_attempts,
+      warning_fields (warning code -> field path), metric_names (field -> words)
     From provider: temperature
     """
 
@@ -278,6 +286,8 @@ class B2Config:
     prompt_version: str
     max_attempts: int
     temperature: float
+    warning_fields: dict[str, str]
+    metric_names: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -311,15 +321,20 @@ class B1Result:
                   when nothing may be shown
     verification: of the answer that was shown, or None
     sql:          the query that produced it, or None
-    attempts:     model calls made: router, SQL writer and prose writer together
+    attempts:     model calls made: retrieval router, router, SQL writer and
+                  prose writer together
     reason:       why nothing was shown, why B-1 abstained, or why the prose failed
     template:     the slot template the answer's facts were filled from, or None.
                   Printed by main; not part of the envelope.
     trace:        what each step was given and gave back, for tracing an
                   answer to its source. Printed by main; not part of the envelope:
                     question
-                    router:      calls [{attempt, reply, rejected}], route (the
-                                 checked Route)
+                    retrieval:   calls [{attempt, reply, rejected}], result (the
+                                 checked Retrieval)
+                    router:      kind (derivation or lookup, None when the
+                                 retrieval router stopped it), calls [{attempt,
+                                 reply, rejected}], route (the checked Route
+                                 or LookupRoute)
                     sql_writer:  one per route: route, instances, calls
                                  [{attempt, reply, rejected, summary_sql}], sql,
                                  values (slot -> cell), slots (slot -> path)

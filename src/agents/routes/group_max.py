@@ -10,7 +10,7 @@ model or runs the query.
 
 from typing import Sequence
 
-from agents.database import RUNS, d5_schema
+from agents.database_derivation import RUNS, d5_schema
 from agents.schema import DerivationConfig
 
 TYPE = "group_max"
@@ -62,23 +62,23 @@ The question may be about one of these maxima or several.
 
 ZONES AND CHECKPOINTS
 The route has two levels:
-- A zone is an area of the route: a row of racks (rowA_back), a place (home),
-  or a stretch named like its checkpoint (checkpoint_1).
-- A checkpoint is one stop inside a zone: a single rack (a3_back). A zone
-  holds one checkpoint or several. When it holds one, the two often share a
-  name.
+- A zone is an area of the route.
+- A checkpoint is one stop inside a zone. A zone holds one checkpoint or
+  several. When it holds one, the two often share a name.
+<zone> and <checkpoint> below stand for any zone or checkpoint name; the
+real ones are listed under WHAT TO READ.
 Every reading is tagged with the zone it was taken in. So with "per zone" each
 maximum is a zone's highest reading, over all its readings, and source_id says
 which reading it was: with checkpoint readings, the checkpoint it came from.
 There is no maximum of a checkpoint on its own, except where it is the zone's
 source_id.
-- A question about a zone ("in rowA_back", "per zone"): read d5_<instance> and
+- A question about a zone ("in <zone>", "per zone"): read d5_<instance> and
   filter d.group_key to the zones listed under WHAT TO READ, or group by it.
-- A question about a checkpoint ("at a3_back"): find its zone through
+- A question about a checkpoint ("at <checkpoint>"): find its zone through
   d5_<instance>_checkpoints, and answer with that zone's maximum and its
   source_id. Select the checkpoint, the zone and source_id, so the answer says
   whose maximum it is and whether the checkpoint was the one that reached it.
-- A question about a zone's checkpoints ("which checkpoints are in rowA_back")
+- A question about a zone's checkpoints ("which checkpoints are in <zone>")
   is d5_<instance>_checkpoints alone.
 
 WHICH READING IS WHICH
@@ -194,23 +194,23 @@ RULES FOR THE QUERY
   run_order, instance, position.
 
 EXAMPLES
-The maximum in one zone, rowA_back, in each run, and which reading it was:
+The maximum in one zone, in each run, and which reading it was:
   SELECT r.run_id, d.group_key, d.max, d.source_id, d.tied_with, d.reason,
          d.path AS path_d, r.path AS path_r
   FROM d5_<instance> d JOIN runs r ON r.run_id = d.run_id
-  WHERE d.run_id IN (<run_ids>) AND (d.group_key = 'rowA_back' OR d.group_key IS NULL)
+  WHERE d.run_id IN (<run_ids>) AND (d.group_key = '<zone>' OR d.group_key IS NULL)
   ORDER BY r.run_order, d.position
-The maximum at a3_back, in each run (its zone's maximum):
+The maximum at one checkpoint, in each run (its zone's maximum):
   SELECT r.run_id, c.checkpoint_id, d.group_key, d.max, d.source_id, d.tied_with, d.reason,
          c.path AS path_c, d.path AS path_d, r.path AS path_r
   FROM d5_<instance> d JOIN runs r ON r.run_id = d.run_id
   JOIN d5_<instance>_checkpoints c ON c.run_id = d.run_id AND c.group_key = d.group_key
-  WHERE d.run_id IN (<run_ids>) AND c.checkpoint_id IN ('a3_back')
+  WHERE d.run_id IN (<run_ids>) AND c.checkpoint_id IN ('<checkpoint>')
   ORDER BY r.run_order, d.position
-Which checkpoints are in rowA_back:
+Which checkpoints are in <zone>:
   SELECT r.run_id, c.group_key, c.checkpoint_id, c.checkpoint_name, c.path AS path_c, r.path AS path_r
   FROM d5_<instance>_checkpoints c JOIN runs r ON r.run_id = c.run_id
-  WHERE c.run_id IN (<run_ids>) AND c.group_key = 'rowA_back'
+  WHERE c.run_id IN (<run_ids>) AND c.group_key = '<zone>'
   ORDER BY r.run_order, c.position
 The peak in each run, from a per run_id table:
   SELECT r.run_id, d.max, d.reason, d.path AS path_d, r.path AS path_r

@@ -10,7 +10,7 @@ model or runs the query.
 
 from typing import Sequence
 
-from agents.database import RUNS, d6_schema
+from agents.database_derivation import RUNS, d6_schema
 from agents.schema import DerivationConfig
 
 TYPE = "rank_top_n"
@@ -60,17 +60,18 @@ TABLES
 The question may be about one of these rankings or several.
 
 CHECKPOINTS AND ZONES
-The route has two levels: zones, areas such as a row of racks (rowA_back),
-and checkpoints, the stops inside them, such as a single rack (a3_back).
+The route has two levels: zones, the areas of the route, and checkpoints,
+the stops inside them. <zone> and <checkpoint> below stand for any zone or
+checkpoint name.
 - A ranking is over the checkpoint readings of the whole run: one reading
   per checkpoint stop. item_id is the checkpoint_id the reading came from. A
   checkpoint visited twice can be ranked twice.
 - A ranking holds no zones. It is never worked out per zone, and the tables
   do not say which zone a ranked checkpoint is in. A question about the top
-  readings in a zone ("the five hottest checkpoints in rowA_back"), or which
+  readings in a zone ("the five hottest checkpoints in <zone>"), or which
   zone the top readings were in, cannot be answered: abstain.
-- A question about a checkpoint ("did a3_back make the top five", "where did
-  a3_back rank"): filter k.item_id to it. A row gives its rank and reading;
+- A question about a checkpoint ("did <checkpoint> make the top five",
+  "where did <checkpoint> rank"): filter k.item_id to it. A row gives its rank and reading;
   no row means it was not among the highest, or its reading was excluded.
 
 WHICH READING IS WHICH
@@ -117,7 +118,7 @@ SHAPES OF QUESTION
   ranked row and t.n_requested, so the answer says only that many are held.
 - The single highest ("which checkpoint vibrated most"): rank 1, plus any
   reading tied with it (see HOW MANY ROWS).
-- Whether a checkpoint is among them ("is a3_back in the top five"), or
+- Whether a checkpoint is among them ("is <checkpoint> in the top five"), or
   where it ranked: filter k.item_id; no row means it is not.
 - Out of how many ("out of how many readings"): t.population.
 - Several rankings (any two, or all three): one SELECT per ranking, each with
@@ -178,10 +179,10 @@ The top three, keeping ties:
     AND (k.rank <= 3 OR k.value = (SELECT k2.value FROM d6_<instance>_ranking k2
                                     WHERE k2.run_id = k.run_id AND k2.rank = 3))
   ORDER BY r.run_order, k.rank
-Did a1_back or a3_back make the top readings, and at what rank:
+Did two named checkpoints make the top readings, and at what rank:
   SELECT r.run_id, k.item_id, k.rank, k.value, k.path AS path_k, r.path AS path_r
   FROM d6_<instance>_ranking k JOIN runs r ON r.run_id = k.run_id
-  WHERE k.run_id IN (<run_ids>) AND k.item_id IN ('a1_back', 'a3_back')
+  WHERE k.run_id IN (<run_ids>) AND k.item_id IN ('<checkpoint>', '<checkpoint>')
   ORDER BY r.run_order, k.rank
 How many readings the ranking was taken from:
   SELECT r.run_id, t.population, t.reason, t.path AS path_t, r.path AS path_r

@@ -1,59 +1,42 @@
-{#- B-2 executive summary: one macro per fact. Every argument is a slot
-    placeholder, a list of them, or wording chosen by code; no value is
-    written here. The model only orders the facts. -#}
+{#- B-2 executive summary: one macro per paragraph (worked example, section 1).
+    Every argument that prints a value is a slot placeholder from
+    b2_narrative.Writer; code fills it. Arguments ending in _n are plain numbers
+    used only to choose singular or plural, and are never printed. The literal
+    text holds no digits and no number words. A line starting "- " is a bullet;
+    the report renders a paragraph's bullets as a list. -#}
 
-{% macro run_outcome(run, facility, start, end, run_status, final_status) -%}
-Run {{ run }} at {{ facility }} started {{ start }} and ended {{ end }}, with run status {{ run_status }} and final status {{ final_status }}.
+{% macro verdict(facility, date, start, duration, run_status_phrase, final_status) -%}
+{{ facility }} was inspected{% if date %} on {{ date }}{% endif %}{% if start %}, beginning at {{ start }}{% endif %}{% if duration %} and running for {{ duration }}{% endif %}. The run {{ run_status_phrase }} and closed with an overall result of {{ final_status }}.
 {%- endmacro %}
 
-{% macro coverage(completed, required) -%}
-Checkpoints completed: {{ completed }} of {{ required }}.
+{% macro empty() -%}
+No checkpoints were recorded for this run.
 {%- endmacro %}
 
-{% macro tally(label, n, ids) -%}
-{{ label }}: {{ n }}{% if ids %} ({{ ids | join(", ") }}){% endif %}.
+{% macro results(passed, passed_n, failed, warned, warned_n) -%}
+{{ passed }} checkpoint{{ "" if passed_n == 1 else "s" }} returned PASS{% if warned_n %}, {{ warned }} returned WARN{% endif %} and {{ failed }} returned FAIL.
 {%- endmacro %}
 
-{% macro count_mismatch(labels) -%}
-The robot's declared counts disagree with its own lists for {{ labels | join(", ") }}; the coverage statement gives both figures.
+{% macro failed_lead() -%}
+The failed checkpoints, grouped by what was recorded at them:
 {%- endmacro %}
 
-{% macro finding(feature, checkpoint, severity, status) -%}
-{{ feature }} at {{ checkpoint }} (severity {{ severity }}, status {{ status }})
+{% macro failed_group(has_evidence, findings, names) -%}
+- {{ "Captured evidence images" if has_evidence else "Captured no evidence images" }}, {% if findings %}with findings of {{ findings }}{% else %}with no findings logged{% endif %}: {{ names }}.
 {%- endmacro %}
 
-{% macro findings(items) -%}
-Findings recorded: {{ items | join("; ") }}.
+{% macro finding(feature, severity) -%}
+{{ feature }} ({{ severity }})
 {%- endmacro %}
 
-{% macro no_findings(run) -%}
-No findings were recorded on run {{ run }}.
+{% macro contradiction_pointer() -%}
+The record's own counts disagree with its data; both are set out in the coverage statement.
 {%- endmacro %}
 
-{% macro review(items) -%}
-Findings the detector abstained on, which need human review: {{ items | join("; ") }}.
+{% macro gap_pointer(label) -%}
+{{ label }} was not recorded on this run; see the coverage statement.
 {%- endmacro %}
 
-{% macro alerts(critical, warning) -%}
-Sensor alerts logged: {{ critical }} critical, {{ warning }} warning.
-{%- endmacro %}
-
-{% macro exclusion(block, scope, reason) -%}
-{{ block }} {% if scope %}at {{ scope }}{% else %}for the whole run{% endif %} ({{ reason }})
-{%- endmacro %}
-
-{% macro excluded(items) -%}
-Sensor values left out: {{ items | join("; ") }}.
-{%- endmacro %}
-
-{% macro stale_item(block, scope) -%}
-{{ block }} at {{ scope }}
-{%- endmacro %}
-
-{% macro stale(items) -%}
-Readings used although stale when taken: {{ items | join("; ") }}.
-{%- endmacro %}
-
-{% macro top_reading(field, value, checkpoint) -%}
-Highest checkpoint reading of {{ field }}: {{ value }} at {{ checkpoint }}.
+{% macro measurement(field, zone, value, n, n_n, source) -%}
+The highest mean {{ field }} was recorded in zone {{ zone }}, at {{ value }} across {{ n }} {{ source }}{{ "" if n_n == 1 else "s" }}.
 {%- endmacro %}

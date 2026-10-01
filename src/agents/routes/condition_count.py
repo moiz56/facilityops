@@ -6,7 +6,7 @@ only: the counts, the items that met the condition, and the items left out
 and why. Nothing here calls the model or runs the query.
 """
 
-from agents.database import D2, RUNS
+from agents.database_derivation import D2, RUNS
 
 TYPE = "condition_count"
 TABLES = (RUNS + D2).strip()
@@ -22,7 +22,7 @@ ORDER BY r.run_order, d.instance"""
 
 # Written by hand. The SQL writer fills these placeholders:
 #   {schema}       TABLES
-#   {instances}    one line per routed D2 instance, as b1_analytical_router.describe writes it
+#   {instances}    one line per routed D2 instance, as b1_analytical_router_derived.describe writes it
 #   {run_ids}      the run_ids the router resolved, oldest first, quoted and comma separated
 #   {checkpoints}  the checkpoint_ids the router resolved, the same way, or "(any)" when none
 #   {question}     the user's question
@@ -63,7 +63,7 @@ HOW TO READ THE TABLES
   run recorded them. item_id is the checkpoint_id; it is NULL for findings and
   sensor alerts, which are left out by reason only. count is how many items a
   row covers: 2 for a checkpoint visited twice. Use it for "which checkpoints
-  were left out", "why was checkpoint_3 not counted" or "which were missed".
+  were left out", "why was <checkpoint> not counted" or "which were missed".
   Its counts add up to inputs_excluded; never add them yourself.
 - An item is either counted (in population), or excluded (in
   d2_excluded_items). Of the counted items, only the ones that met the
@@ -72,6 +72,37 @@ HOW TO READ THE TABLES
 - status NOT_COMPUTABLE on d2_condition_count means the count could not be
   made for that run: select its reason.
 - runs gives each run's start_time, and run_order for ordering (0 = oldest).
+
+MISSED IS NOT FAILED
+A checkpoint has two separate fields, and questions often mix them up:
+- status: whether the robot got to the checkpoint. COMPLETED if it did,
+  MISSED if it never reached it.
+- result_status: the verdict of an inspection that took place: PASS, FAIL or
+  WARN.
+A MISSED checkpoint was never inspected, so it has no verdict: it did not
+fail, and it did not pass. A FAILED checkpoint was reached and inspected, and
+its verdict was FAIL.
+In a count on result_status (read its condition under THE COUNTS THE
+QUESTION USES), the two sit in different tables and never mix:
+- Failed checkpoints are counted: they are in count and in d2_matching_ids.
+- Missed checkpoints are left out: they are in d2_excluded_items with
+  x.reason = 'checkpoint status is MISSED', and never in count, population
+  or d2_matching_ids.
+So:
+- "failed", "did not pass", "FAIL": d2_matching_ids, or count for how many.
+  Never add the missed checkpoints to them.
+- "missed", "skipped", "not reached", "not visited", "not inspected":
+  d2_excluded_items filtered to x.reason = 'checkpoint status is MISSED'.
+  Never read them from d2_matching_ids, and never call them failed.
+- "failed or missed", "which had a problem", "which did not go well": both,
+  as separate lists labelled failed and missed (see EXAMPLES), so the answer
+  keeps them apart.
+- "how many were missed": list the missed checkpoints with x.count. Do not
+  give inputs_excluded as that number: it is every item left out, for any
+  reason, not only the missed ones.
+- "did <checkpoint> fail": filter m.item_id to it. No row there means it did
+  not fail, or that it was missed: read d2_excluded_items for it too, so the
+  answer can say which. A missed checkpoint is "not inspected", not "passed".
 
 HOW MANY ROWS
 Fetch exactly as many rows as the question asks for, no more.
@@ -90,14 +121,13 @@ Fetch exactly as many rows as the question asks for, no more.
 - A number of them ("name two failed checkpoints"): with one run, LIMIT that
   number. With several runs do not LIMIT, as it cuts across runs.
 - Whether any did ("were there any critical alerts"): select count, which is
-  one row per run already. Whether a named item did ("did checkpoint_3
-  fail"): filter m.item_id to it. No row means it did not, or that it was
-  left out: when that matters ("was checkpoint_3 checked"), read
-  d2_excluded_items for it instead.
+  one row per run already. Whether a named item did ("did <checkpoint>
+  fail"): see MISSED IS NOT FAILED.
 - Never LIMIT a list the question asked for in full.
 
 RULES FOR THE QUERY
-- One SELECT statement, nothing else.
+- One statement: a SELECT, or two SELECTs joined with UNION ALL when failed
+  and missed checkpoints are listed together. Nothing else.
 - Select stored columns only. No COUNT, SUM, AVG, MIN or MAX, and no
   arithmetic on values: every count is already in a table. ORDER BY, LIMIT
   and subqueries are fine (see HOW MANY ROWS).
@@ -130,7 +160,25 @@ How many checkpoints failed, out of how many:
   FROM d2_condition_count d JOIN runs r ON r.run_id = d.run_id
   WHERE d.instance = '<instance>' AND d.run_id IN (<run_ids>)
   ORDER BY r.run_order
-Which checkpoints were left out of the count, and why:
+Which checkpoints were missed:
+  SELECT r.run_id, x.item_id, x.reason, x.path AS path_x, r.path AS path_r
+  FROM d2_excluded_items x JOIN runs r ON r.run_id = x.run_id
+  WHERE x.instance = '<instance>' AND x.run_id IN (<run_ids>)
+    AND x.reason = 'checkpoint status is MISSED'
+  ORDER BY r.run_order, x.position
+Which checkpoints failed and which were missed, kept apart:
+  SELECT r.run_id, r.run_order, m.position, m.item_id AS failed, NULL AS missed, NULL AS reason,
+         m.path AS path_m, NULL AS path_x, r.path AS path_r
+  FROM d2_matching_ids m JOIN runs r ON r.run_id = m.run_id
+  WHERE m.instance = '<instance>' AND m.run_id IN (<run_ids>)
+  UNION ALL
+  SELECT r.run_id, r.run_order, x.position, NULL, x.item_id, x.reason,
+         NULL, x.path, r.path
+  FROM d2_excluded_items x JOIN runs r ON r.run_id = x.run_id
+  WHERE x.instance = '<instance>' AND x.run_id IN (<run_ids>)
+    AND x.reason = 'checkpoint status is MISSED'
+  ORDER BY run_order, missed, position
+Which checkpoints were left out of the count, for any reason, and why:
   SELECT r.run_id, x.item_id, x.reason, x.path AS path_x, r.path AS path_r
   FROM d2_excluded_items x JOIN runs r ON r.run_id = x.run_id
   WHERE x.instance = '<instance>' AND x.run_id IN (<run_ids>)

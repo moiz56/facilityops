@@ -30,6 +30,20 @@ DERIVED_OUTPUT = re.compile(r"derived\.values\.\w+(?:\[\d+\])?")
 # derivation instance or D7's only_in_a. Its citation is the path without it.
 KEY = "#key"
 
+# A slot path ending in WORDS prints a whole number as words (7 -> seven);
+# CAP_WORDS capitalises it for the start of a sentence (Seven). The verifier
+# still reads the word as a count. Its citation is the path without it.
+WORDS = "#words"
+CAP_WORDS = "#Words"
+# A slot path ending in ORDINAL prints a whole number as an ordinal word
+# (2 -> second). The verifier reads it as an ordinal.
+ORDINAL = "#ordinal"
+ORDINALS = ("first second third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth "
+            "thirteenth fourteenth fifteenth sixteenth seventeenth eighteenth nineteenth twentieth").split()
+ONES = ("zero one two three four five six seven eight nine ten eleven twelve thirteen "
+        "fourteen fifteen sixteen seventeen eighteen nineteen").split()
+TENS = "twenty thirty forty fifty sixty seventy eighty ninety".split()
+
 
 class MissingSlotError(ValueError):
     """A slot whose source path resolves to nothing (section 7.1)."""
@@ -111,6 +125,24 @@ def format_slot(
     raise ValueError(f"'{path}' holds a {type(value).__name__}, which has no printed form")
 
 
+def number_words(n: int) -> str:
+    """0-99 as words (7 -> seven, 21 -> twenty-one); anything else stays digits."""
+    if 0 <= n < 20:
+        return ONES[n]
+    if 20 <= n < 100:
+        tens, ones = divmod(n, 10)
+        return TENS[tens - 2] + (f"-{ONES[ones]}" if ones else "")
+    return str(n)
+
+
+def ordinal_words(n: int) -> str:
+    """1-20 as ordinal words (2 -> second); anything else as 21st, 22nd, ..."""
+    if 1 <= n <= len(ORDINALS):
+        return ORDINALS[n - 1]
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
 def fill_slots(template: Template, extended: ExtendedRecord, config: DerivationConfig) -> FilledTemplate:
     """Fill every slot in the template, left to right, recording each span.
 
@@ -129,7 +161,10 @@ def fill_slots(template: Template, extended: ExtendedRecord, config: DerivationC
             raise MissingSlotError(f"slot '{slot_id}' in template '{template.name}' has no source path")
         path = template.slots[slot_id]
         key_only = path.endswith(KEY)
-        path = path.removesuffix(KEY)
+        words = path.endswith((WORDS, CAP_WORDS))
+        capital = path.endswith(CAP_WORDS)
+        ordinal = path.endswith(ORDINAL)
+        path = path.removesuffix(KEY).removesuffix(WORDS).removesuffix(CAP_WORDS).removesuffix(ORDINAL)
         value, parent, key = resolve(path, extended)
         if value is None or value == "" or value == [] or value == ():
             raise MissingSlotError(f"slot '{slot_id}' in template '{template.name}': '{path}' resolves to nothing")
@@ -140,6 +175,11 @@ def fill_slots(template: Template, extended: ExtendedRecord, config: DerivationC
             value = key
             parent = None   # a key has no *_formatted sibling
         formatted = format_slot(value, parent, key, path, config, measured_field(path, extended))
+        if words and isinstance(value, int) and not isinstance(value, bool):
+            formatted = number_words(value)
+            formatted = formatted[0].upper() + formatted[1:] if capital else formatted
+        if ordinal and isinstance(value, int) and not isinstance(value, bool):
+            formatted = ordinal_words(value)
 
         literal = template.text[pos:match.start()]
         parts.append(literal)

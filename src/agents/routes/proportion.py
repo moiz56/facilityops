@@ -5,7 +5,7 @@ placeholders and asks the model for one SELECT over the runs and D3 tables
 only. Nothing here calls the model or runs the query.
 """
 
-from agents.database import D3, RUNS
+from agents.database_derivation import D3, RUNS
 
 TYPE = "proportion"
 TABLES = (RUNS + D3).strip()
@@ -21,7 +21,7 @@ ORDER BY r.run_order, d.instance"""
 
 # Written by hand. The SQL writer fills these placeholders:
 #   {schema}       TABLES
-#   {instances}    one line per routed D3 instance, as b1_analytical_router.describe writes it
+#   {instances}    one line per routed D3 instance, as b1_analytical_router_derived.describe writes it
 #   {run_ids}      the run_ids the router resolved, oldest first, quoted and comma separated
 #   {checkpoints}  the checkpoint_ids the router resolved, the same way, or "(any)" when none
 #   {question}     the user's question

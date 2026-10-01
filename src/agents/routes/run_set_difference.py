@@ -7,7 +7,7 @@ with the latest, so its rows have no run_id (PER_RUN = False). Nothing here
 calls the model or runs the query.
 """
 
-from agents.database import D7, RUNS
+from agents.database_derivation import D7, RUNS
 
 TYPE = "run_set_difference"
 PER_RUN = False
@@ -129,10 +129,10 @@ How many checkpoints each run had that the other did not:
   SELECT d.run_a, d.run_b, d.count_only_in_a, d.count_only_in_b, d.reason, d.path AS path_d
   FROM d7_run_set_difference d
   WHERE d.instance = '<instance>'
-Was a3_back on both routes:
+Was one checkpoint on both routes:
   SELECT d.run_a, d.run_b, c.checkpoint_id, c.membership, c.path AS path_c, d.path AS path_d
   FROM d7_checkpoints c JOIN d7_run_set_difference d ON d.instance = c.instance
-  WHERE c.instance = '<instance>' AND c.checkpoint_id = 'a3_back'
+  WHERE c.instance = '<instance>' AND c.checkpoint_id = '<checkpoint>'
 
 REPLY
 JSON only, one of:

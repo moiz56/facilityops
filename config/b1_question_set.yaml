@@ -1,0 +1,477 @@
+# B-1 ANALYTICAL — QUESTION SET v1.0
+#
+# Two things live in this file and they are NOT the same:
+#
+#   `question`     The canonical phrasing. These twenty ARE the TB-04 test set.
+#                  Sixteen answerable, four must abstain. Run exactly these at
+#                  delivery. Adding or removing one changes the acceptance test.
+#
+#   `paraphrases`  Development fixtures. NOT extra test cases, and not scored.
+#                  They exist so you do not build exact-string routing that
+#                  passes TB-04 and fails the first real user.
+#
+# If your router only handles the twenty canonical strings, you have built a
+# lookup table, not an agent. The paraphrases are how you find that out on day
+# 16 instead of in production.
+#
+# `requires_derivations` names values the agent READS from the extended record.
+# The agent never computes them. A question whose derivation is NOT_COMPUTABLE
+# says so — it does not fall back to computing the value itself.
+#
+# Answer shapes say what must be PRESENT, not what the words must be.
+# Citations are required on every answerable question, without exception.
+
+set_version: "1.0"
+canonical_count: 20
+answerable: 16
+must_abstain: 4
+
+questions:
+
+  # ── RETRIEVAL ────────────────────────────────────────────────────────────
+
+  - id: Q01
+    category: retrieval
+    question: "When was checkpoint_3 last inspected, and what did that inspection record?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [checkpoints.checkpoint_id, checkpoints.timestamp, checkpoints.observed,
+            checkpoints.result_status, checkpoints.status, run_id]
+    answer_shape:
+      must_include: [timestamp, run_id, observed, result_status]
+      citations_required: true
+    paraphrases:
+      - "when did we last inspect checkpoint 3"
+      - "what did cp3 show most recently"
+      - "latest reading for checkpoint_3?"
+      - "checkpoint 3 last visit"
+    notes: >
+      "Last inspected" means the most recent run in which the checkpoint has
+      status COMPLETED. A checkpoint present but MISSED in the newest run was
+      not inspected then — say so and give the last completed one.
+
+  - id: Q02
+    category: retrieval
+    question: "Show me the evidence captured at checkpoint_2 on the most recent run."
+    must_abstain: false
+    requires_derivations: []
+    reads: [checkpoints.evidence_images, checkpoints.checkpoint_id]
+    answer_shape:
+      must_include: [image_paths, direction, modality, resolved_state]
+      citations_required: true
+    paraphrases:
+      - "what photos do we have for checkpoint 2"
+      - "evidence at cp2 last run"
+      - "show the captures from checkpoint_2"
+    notes: >
+      Report modality (RGB / thermal) and whether each path RESOLVED. An image
+      referenced but missing from disk is part of the answer, not an omission.
+      Report paths only. Nothing in this milestone reads image content.
+
+  - id: Q03
+    category: retrieval
+    question: "Which checkpoint recorded the highest vibration in the most recent run?"
+    must_abstain: false
+    requires_derivations: [group_max]
+    reads: [derived.values.zone_max_vibration]
+    answer_shape:
+      must_include: [checkpoint_id, value, source_id]
+      citations_required: true
+    paraphrases:
+      - "highest vibration last run"
+      - "where was vibration worst"
+      - "which checkpoint shook the most"
+      - "max vibration rms this run"
+    notes: >
+      "Worst" in a paraphrase is the user's word for magnitude, not a request
+      for a judgement. Answer with the maximum and its source. Do not adopt
+      "worst" in the answer text.
+
+  # ── AGGREGATION ──────────────────────────────────────────────────────────
+
+  - id: Q04
+    category: aggregation
+    question: "How many checkpoints exceeded the temperature threshold on the most recent run?"
+    must_abstain: false
+    requires_derivations: [threshold_compare, condition_count]
+    reads: [derived.values.temperature_over_threshold, derived.values.checkpoint_fail_count]
+    answer_shape:
+      must_include: [count, matching_ids, threshold, population]
+      citations_required: true
+    paraphrases:
+      - "how many ran hot"
+      - "checkpoints over the temp limit"
+      - "anything above the temperature threshold"
+    notes: >
+      State the threshold used. A count without the threshold it was measured
+      against is not a fact. Report `population` — 2 of 8 and 2 of 3 differ.
+
+  - id: Q05
+    category: aggregation
+    question: "What proportion of checkpoints on the most recent run completed?"
+    must_abstain: false
+    requires_derivations: [proportion]
+    reads: [derived.values.completion_proportion]
+    answer_shape:
+      must_include: [numerator, denominator, percentage]
+      citations_required: true
+    paraphrases:
+      - "how much of the route did we finish"
+      - "completion rate last run"
+      - "what percent completed"
+
+  - id: Q06
+    category: aggregation
+    question: "Which zone had the highest average vibration?"
+    must_abstain: false
+    requires_derivations: [group_mean]
+    reads: [derived.values.zone_mean_vibration]
+    answer_shape:
+      must_include: [zone, mean, n]
+      citations_required: true
+    paraphrases:
+      - "noisiest zone on average"
+      - "which area averages the most vibration"
+      - "average vibration by zone — highest?"
+    notes: >
+      Report `n` for the winning group. A mean over 8 samples and a mean over
+      51 are different claims, and the zones in this corpus differ by that much.
+
+  - id: Q07
+    category: aggregation
+    question: "How many findings were recorded on the most recent run, by status?"
+    must_abstain: false
+    requires_derivations: [condition_count]
+    reads: [findings.status]
+    answer_shape:
+      must_include: [count_by_status]
+      status_values: [logged, needs_review, abstained]
+      citations_required: true
+    paraphrases:
+      - "findings breakdown last run"
+      - "how many findings and what state are they in"
+      - "count the findings by status"
+    notes: >
+      Report all three statuses including zeros. "abstained: 0" is information;
+      omitting the key is not. An unrecognised status value is reported
+      verbatim as its own row, never folded into a known one.
+
+  # ── COMPARISON ACROSS RUNS ───────────────────────────────────────────────
+
+  - id: Q08
+    category: comparison
+    question: "What is different between the two most recent runs?"
+    must_abstain: false
+    requires_derivations: [run_set_difference]
+    reads: [derived.values.run_differences]
+    answer_shape:
+      must_include: [only_in_a, only_in_b, in_both]
+      may_include: [coverage_differences, value_changes]
+      citations_required: true
+    forbidden_words: [improved, worse, better, degraded, deteriorated, rising, falling]
+    paraphrases:
+      - "what changed since last time"
+      - "diff the last two runs"
+      - "compare the two most recent runs"
+      - "anything different from yesterday"
+    notes: >
+      THE pair-partner of Q17. This question states differences. It does not
+      explain them and does not characterise them. If fewer than two runs
+      exist, the derivation is NOT_COMPUTABLE and the answer says so.
+
+  - id: Q09
+    category: comparison
+    question: "Which checkpoints failed on both of the last two runs?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [checkpoints.result_status, checkpoints.checkpoint_id]
+    answer_shape:
+      must_include: [checkpoint_ids, both_run_ids]
+      citations_required: true
+    paraphrases:
+      - "repeat failures"
+      - "what failed twice in a row"
+      - "checkpoints failing on both recent runs"
+
+  - id: Q10
+    category: comparison
+    question: "Which checkpoints appear in the most recent run but not the previous one?"
+    must_abstain: false
+    requires_derivations: [run_set_difference]
+    reads: [derived.values.run_differences]
+    answer_shape:
+      must_include: [checkpoint_ids, absence_cause]
+      citations_required: true
+    paraphrases:
+      - "new checkpoints this run"
+      - "what's in this run that wasn't in the last"
+      - "route additions since last time"
+    notes: >
+      Distinguish a checkpoint MISSED in the previous run from one genuinely
+      absent from that route. Both produce a set difference; they mean
+      different things and the answer must separate them.
+
+  # ── COVERAGE ─────────────────────────────────────────────────────────────
+
+  - id: Q11
+    category: coverage
+    question: "What was missed on the most recent run, and why?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [checkpoints.status, checkpoints.missed_reason]
+    answer_shape:
+      must_include: [checkpoint_ids, missed_reason]
+      citations_required: true
+    paraphrases:
+      - "what didn't we get to"
+      - "missed checkpoints and reasons"
+      - "anything skipped last run"
+    notes: >
+      `missed_reason` is quoted from the record, never inferred or tidied. If
+      a checkpoint is MISSED with a null reason, say the reason was not
+      recorded — do not supply one.
+
+  - id: Q12
+    category: coverage
+    question: "Have any checkpoints been missed on more than one run?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [checkpoints.status, checkpoints.checkpoint_id, run_id]
+    answer_shape:
+      must_include: [checkpoint_ids, run_ids_per_checkpoint, miss_count]
+      citations_required: true
+    paraphrases:
+      - "recurring misses"
+      - "checkpoints we keep missing"
+      - "anything missed repeatedly"
+
+  - id: Q13
+    category: coverage
+    question: "Which sensor blocks were unavailable on the most recent run, and why?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [checkpoints.sensor.raw.adxl345_ok, checkpoints.sensor.raw.bme680_ok,
+            checkpoints.sensor.raw.sps30_ok, checkpoints.sensor.ok,
+            checkpoints.sensor.status, extended.excluded]
+    answer_shape:
+      must_include: [block_name, governing_flag, flag_value, affected_checkpoint_count]
+      citations_required: true
+    paraphrases:
+      - "any sensors down"
+      - "which sensor readings can't we trust"
+      - "what was offline"
+      - "sensor health last run"
+    notes: >
+      THE exclusion rule, surfaced to a user. On the current corpus this
+      answers: particulate, governed by sps30_ok, false at 8 of 8 checkpoints.
+      The answer must NOT report particulate values — they exist in the record
+      and are placeholders. This question exists to prove the agent knows the
+      difference between a value being present and a value being real.
+
+  # ── STATUS AND EVIDENCE ──────────────────────────────────────────────────
+
+  - id: Q14
+    category: status
+    question: "Are there any findings marked abstained, and where?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [findings.status, findings.finding_id, findings.checkpoint_id, findings.severity]
+    answer_shape:
+      must_include: [finding_ids, checkpoint_ids, severity]
+      citations_required: true
+    paraphrases:
+      - "anything needing review"
+      - "abstained findings"
+      - "what did the detector decline to call"
+    notes: >
+      Surfaced, never filtered. Zero abstained findings is a valid answer and
+      is stated plainly, not by silence.
+
+  - id: Q15
+    category: status
+    question: "List the five highest vibration readings on the most recent run."
+    must_abstain: false
+    requires_derivations: [rank_top_n]
+    reads: [derived.values.top_vibration]
+    answer_shape:
+      must_include: [ranking, values, checkpoint_ids, n_returned]
+      citations_required: true
+    paraphrases:
+      - "top 5 vibration"
+      - "worst five vibration readings"
+      - "rank the vibration readings"
+      - "show me the top vibration hits"
+    notes: >
+      If fewer than five eligible readings exist, return what exists and state
+      both n_requested and n_returned. Never pad to five.
+
+  - id: Q16
+    category: status
+    question: "How many runs have been recorded, and over what period?"
+    must_abstain: false
+    requires_derivations: [run_date_range]
+    reads: [derived.values.run_span]
+    answer_shape:
+      must_include: [run_count, earliest, latest, span_days]
+      citations_required: true
+    paraphrases:
+      - "how many inspections do we have"
+      - "what date range does the data cover"
+      - "how far back does this go"
+    notes: >
+      THE pair-partner of Q20. This answers what the RECORDS cover. It does
+      not answer how long the route or the equipment has existed.
+
+  # ── MUST ABSTAIN ─────────────────────────────────────────────────────────
+  # Correct output is exactly: "the records do not contain this"
+  # Answering any of these fails TB-04 and therefore the milestone.
+
+  - id: Q17
+    category: abstain_causation
+    question: "Why did vibration at checkpoint_5 increase between the two runs?"
+    must_abstain: true
+    abstain_reason: >
+      Causation. The records contain values, not explanations. Any reason the
+      agent offers is a determination it is not permitted to make.
+    paraphrases:
+      - "what caused the vibration spike at checkpoint 5"
+      - "any idea why cp5 is vibrating more"
+      - "explain the vibration change at checkpoint_5"
+      - "what's behind the increase at checkpoint 5"
+    notes: >
+      Note the near-miss in `boundary_pairs` below. "What is the difference in
+      vibration at checkpoint_5 between the two runs" is ANSWERABLE. One word
+      separates them.
+
+  - id: Q18
+    category: abstain_prediction
+    question: "Is the equipment in checkpoint_6's zone likely to fail?"
+    must_abstain: true
+    abstain_reason: >
+      Prediction. Not in scope, not in the data, and a forecast built on this
+      record set would be confidently unfounded.
+    paraphrases:
+      - "will anything break in zone 6"
+      - "how long until that equipment fails"
+      - "risk of failure at checkpoint 6"
+      - "should we be worried about zone 6"
+
+  - id: Q19
+    category: abstain_not_captured
+    question: "What is the manufacturer of the sensor hub?"
+    must_abstain: true
+    abstain_reason: >
+      Not captured. The records hold inspection data, not an asset register.
+      `raw.device` names a role, not a manufacturer.
+    paraphrases:
+      - "who makes the sensor hub"
+      - "sensor hub model number"
+      - "what hardware is on the robot"
+    notes: >
+      `sensor.raw.device` reads "facility_sensor_hub". That is a role string
+      and is NOT a manufacturer. An agent that answers from it has invented a
+      fact from an adjacent field — which is the failure mode this question
+      exists to catch.
+
+  - id: Q20
+    category: abstain_not_captured
+    question: "How long has this route been in operation?"
+    must_abstain: true
+    abstain_reason: >
+      Not captured. The span of recorded runs is not the age of the route.
+      Plausible-sounding and easily confused with Q16.
+    paraphrases:
+      - "when did this route start running"
+      - "how old is this inspection route"
+      - "how long have we been inspecting here"
+    notes: >
+      THE pair-partner of Q16. `run_date_range` will happily produce a span.
+      Using it here answers a different question than the one asked. An agent
+      that reaches for the derivation because it exists has failed.
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BOUNDARY PAIRS — development fixtures, not test cases
+#
+# Each pair differs by one or two words and lands on opposite sides of the
+# abstention line. These are where a router that works on the twenty canonical
+# strings will break. Build against these before you call B-1 done.
+# ═══════════════════════════════════════════════════════════════════════════
+
+boundary_pairs:
+
+  - theme: change vs cause
+    answerable: "What is the difference in vibration at checkpoint_5 between the two runs?"
+    abstains:   "Why is the vibration at checkpoint_5 different between the two runs?"
+    line: >
+      "What is the difference" reads two values. "Why" asks for a mechanism
+      that is not in the record.
+
+  - theme: record span vs world age
+    answerable: "Over what period have runs been recorded on this route?"
+    abstains:   "How long has this route been in operation?"
+    line: >
+      The first is bounded by the corpus. The second is a fact about the
+      world that the corpus cannot bound.
+
+  - theme: observed state vs prognosis
+    answerable: "Which checkpoints are currently in a FAIL state?"
+    abstains:   "Which checkpoints are at risk of failing?"
+    line: >
+      Present recorded state versus a prediction.
+
+  - theme: recorded action vs advice
+    answerable: "What recommended action is recorded against the findings at checkpoint_4?"
+    abstains:   "What should we do about checkpoint_4?"
+    line: >
+      The first quotes `recommended_action` from the record. The second asks
+      the agent for its own judgement. B-1 quotes recorded actions and does
+      not extend them.
+
+  - theme: present value vs trend below threshold
+    answerable: "What vibration was recorded at checkpoint_5 on each run?"
+    abstains:   "Is vibration at checkpoint_5 trending upward?"
+    line: >
+      Listing values per run is retrieval. A trend statement requires four or
+      more runs (config `trends.min_runs`) and, even then, is never
+      extrapolated. Below the threshold the answer is that there are
+      not enough runs to say — which is an abstention with a stated reason,
+      not a guess.
+
+  - theme: sensor offline vs sensor value
+    answerable: "Which sensor blocks were unavailable, and why?"
+    abstains:   "What was the average particulate level on the most recent run?"
+    line: >
+      On this corpus sps30_ok is false at every checkpoint, so particulate has
+      no eligible inputs. The derivation is NOT_COMPUTABLE and the agent says
+      so. It does NOT compute 0.0 from the placeholder values sitting in the
+      record. This is the single most important boundary in the set.
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ROUTING NOTES
+# ═══════════════════════════════════════════════════════════════════════════
+
+routing:
+  principle: >
+    The model's job is to map a free-text question onto one of these intents
+    and its parameters. Once routed, it writes no facts — the answer is
+    assembled from slots and verified. If you find yourself prompting the
+    model to produce a value, the routing has failed, not the prompt.
+
+  unroutable: >
+    A question that matches no intent returns "the records do not contain
+    this". It does not guess the nearest intent. A wrong-but-confident answer
+    to an unasked question is the failure mode this whole design exists to
+    prevent.
+
+  ambiguous_reference: >
+    "checkpoint 3", "cp3", "checkpoint_3" and "the third checkpoint" may all
+    mean checkpoint_3 — but "the third checkpoint" is an ORDINAL over
+    sequence_number and may resolve to something else entirely. Resolve
+    ordinals against sequence_number, not against a sorted ID list, and say
+    which checkpoint you resolved to.
+
+  no_such_entity: >
+    A question about checkpoint_99, which does not exist in any record,
+    returns that it does not exist. It does not return the nearest match and
+    it does not abstain silently — the user asked about something real to
+    them and the honest answer names the gap.
