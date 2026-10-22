@@ -1,0 +1,11 @@
+# Milestone 3: the intent set (brief section 3.2).
+#
+# At least 40 intents, the original twenty included. Each one carries a
+# canonical form, the derivations it needs, its answer shape, whether it can
+# be answered at all, and at least five paraphrases. Paraphrases are
+# development fixtures, not tests.
+
+intent_set_version: "1.0"
+
+routing:
+  min_confidence: 0.6     # TUNABLE (brief 3.3). Below this the question is unroutable.
