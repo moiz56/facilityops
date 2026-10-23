@@ -8,6 +8,7 @@ venv
 /output/
 /tests/data
 /reference_run
+/data_tenant
 # rendered by the acceptance tests
 /tests/output/
 

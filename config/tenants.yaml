@@ -1,5 +1,16 @@
-# Milestone 3: tenant to facility mapping (brief section 4).
+# tenant to facility mapping
 #
 # Read only by src/query/scope.py. Each tenant maps to the facility_ids it
-# owns. The mapping for the test corpus is supplied by the client. An
-# ambiguous mapping is escalated, never guessed.
+# owns. A record belongs to a tenant by the facility_id inside it, not by the
+# folder it sits in. A facility listed under two tenants is an ambiguous
+# mapping and is refused, never guessed.
+
+data_dir: data_tenant              # the tenant corpus, relative to the project root
+record_patterns:
+  - "*/*/run.json"                 # data_tenant/<facility folder>/<run>/run.json
+
+tenants:
+  tenant_facility:
+    facility_ids: [sis_facility_checkpoint_route]
+  tenant_racks:
+    facility_ids: [sis_racks_checkpoint_route]
