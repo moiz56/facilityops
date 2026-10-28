@@ -6,7 +6,8 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Sequence
 
-from common.schema import Record
+from common.paths import parse_filename, resolve_evidence
+from common.schema import Checkpoint, Record
 from agents.schema import (
     DerivationConfig, DerivedValues, Eligibility, EligibleValue, Exclusion, ExtendedRecord,
 )
@@ -28,7 +29,7 @@ def extend_record(
 
     records are oldest first. eligibility is computed here unless the caller
     already has it (main computes it first so it can print it).
-    Raises UnknownDerivationError for a type outside the eight.
+    Raises UnknownDerivationError for a type outside the eleven.
     """
     if eligibility is None:
         eligibility = compute_eligibility(records, config)
@@ -551,6 +552,153 @@ def run_date_range(
     }
 
 
+# D9
+
+def sensor_alert_count(
+    record: Record, params: dict, eligibility: Eligibility, config: DerivationConfig,
+) -> dict:
+    """The sensor alerts in one run: how many, and how many of each severity.
+
+    The expected severities are listed first, each with 0 when no alert has
+    it; any other severity found follows, verbatim. A run with no alerts is
+    a count of 0: the run recorded none.
+    """
+    expected = list(params.get("expected") or [])
+    found = Counter(alert.severity for alert in record.sensor_alerts)
+    severities = expected + [s for s in found if s not in expected]
+
+    return {
+        "derivation": "sensor_alert_count",
+        "status": "OK",
+        "count": len(record.sensor_alerts),
+        "by_severity": [
+            {"severity": s, "count": found[s], "expected": s in expected} for s in severities
+        ],
+    }
+
+
+# D10
+
+def evidence_count(
+    record: Record, params: dict, eligibility: Eligibility, config: DerivationConfig,
+) -> dict:
+    """The evidence images in one run: how many, how many are thermal or RGB,
+    and how many resolve or do not. The same per checkpoint, in route order,
+    each listed even when it captured none.
+
+    A checkpoint visited twice is one entry, and an image path recorded on
+    both visits counts once, as in the lookup database's evidence rows.
+    Thermal is read from the file name (common.paths.parse_filename); every
+    other image is RGB. An image resolves when it is a readable file under
+    config.evidence_root (common.paths.resolve_evidence, the report's own
+    check). resolved_count and unresolved_count are None when there is no
+    evidence_root.
+    """
+    images: dict[str, dict] = {}   # checkpoint_id -> its image paths, as an ordered set
+    for cp in record.checkpoints:
+        images.setdefault(cp.checkpoint_id, {}).update(dict.fromkeys(cp.evidence_images))
+
+    root = config.evidence_root
+    by_checkpoint = []
+    for cid, uris in images.items():
+        thermal = sum(1 for uri in uris if parse_filename(uri, cid)[1])
+        resolved = None if root is None else sum(
+            1 for uri in uris if resolve_evidence(uri, root, checkpoint_id=cid).readable
+        )
+        by_checkpoint.append({
+            "checkpoint_id": cid,
+            "count": len(uris),
+            "thermal_count": thermal,
+            "rgb_count": len(uris) - thermal,
+            "resolved_count": resolved,
+            "unresolved_count": None if resolved is None else len(uris) - resolved,
+        })
+
+    totals = {key: sum(e[key] for e in by_checkpoint) for key in ("count", "thermal_count", "rgb_count")}
+    for key in ("resolved_count", "unresolved_count"):
+        totals[key] = None if root is None else sum(e[key] for e in by_checkpoint)
+
+    return {"derivation": "evidence_count", "status": "OK", **totals, "by_checkpoint": by_checkpoint}
+
+
+# D11
+
+def was_warned(cp: Checkpoint) -> bool:
+    """A WARN verdict, or a sensor warning at the checkpoint whatever its verdict."""
+    return cp.result_status == "WARN" or bool(cp.sensor is not None and cp.sensor.warnings)
+
+
+def counted_counts(record: Record) -> dict[str, int]:
+    """Each count the robot declares on the run -> the same count taken from the
+    run's own lists. Every entry in checkpoints counts, so a checkpoint the
+    robot came back to on its round trip counts once per visit."""
+    cps = record.checkpoints
+    return {
+        "total_required_checkpoints": len(cps),
+        "total_completed_checkpoints": sum(1 for cp in cps if cp.status == "COMPLETED"),
+        "passed_checkpoints": sum(1 for cp in cps if cp.result_status == "PASS"),
+        "failed_checkpoints": sum(1 for cp in cps if cp.result_status == "FAIL"),
+        "missed_checkpoints": sum(1 for cp in cps if cp.status == "MISSED"),
+        "warned_checkpoints": sum(1 for cp in cps if was_warned(cp)),
+        "finding_count": len(record.findings),
+    }
+
+
+def count_check(
+    record: Record, params: dict, eligibility: Eligibility, config: DerivationConfig,
+) -> dict:
+    """Whether the counts the robot declared are what the run's lists hold.
+
+    counts: one entry per count declared on the run, in counted_counts' order:
+    the field, the count the robot declared there (None when it declared
+    nothing), the count taken from the lists, and whether they match (None
+    when nothing was declared).
+
+    evidence: one entry per event_log entry with a checkpoint_id and an
+    evidence_count, in log order. On a round trip the robot passes a
+    checkpoint more than once, each pass with its own event, so the nth event
+    for a checkpoint is matched to its nth visit in checkpoints. declared is
+    the event's evidence_count; counted is that visit's evidence_images
+    length. counted is None, and the entry does not match, when there is no
+    such visit. event and visit are positions in event_log and checkpoints.
+
+    mismatch_count is how many entries of both lists do not match.
+    """
+    counts = []
+    for field, counted in counted_counts(record).items():
+        declared = getattr(record, field)
+        counts.append({
+            "field": field, "declared": declared, "counted": counted,
+            "matches": None if declared is None else declared == counted,
+        })
+
+    visits: dict[str, list[int]] = {}   # checkpoint_id -> its positions in checkpoints, in order
+    for j, cp in enumerate(record.checkpoints):
+        visits.setdefault(cp.checkpoint_id, []).append(j)
+    seen: Counter = Counter()   # events matched so far, per checkpoint
+    evidence = []
+    for k, event in enumerate(record.event_log):
+        if event.checkpoint_id is None or event.evidence_count is None:
+            continue
+        n = seen[event.checkpoint_id]
+        seen[event.checkpoint_id] += 1
+        positions = visits.get(event.checkpoint_id, [])
+        j = positions[n] if n < len(positions) else None
+        counted = None if j is None else len(record.checkpoints[j].evidence_images)
+        evidence.append({
+            "event": k, "visit": j, "declared": event.evidence_count, "counted": counted,
+            "matches": counted == event.evidence_count,
+        })
+
+    return {
+        "derivation": "count_check",
+        "status": "OK",
+        "mismatch_count": sum(1 for entry in counts + evidence if entry["matches"] is False),
+        "counts": counts,
+        "evidence": evidence,
+    }
+
+
 # derivations.yaml `type` -> function
 DERIVATIONS = {
     "threshold_compare": threshold_compare,
@@ -561,19 +709,25 @@ DERIVATIONS = {
     "rank_top_n": rank_top_n,
     "run_set_difference": run_set_difference,
     "run_date_range": run_date_range,
+    "sensor_alert_count": sensor_alert_count,
+    "evidence_count": evidence_count,
+    "count_check": count_check,
 }
 
 
-# D1-D6 work on one run and are run once for every run. D7 and D8 compare runs.
-PER_RUN = {"threshold_compare", "condition_count", "proportion", "group_mean", "group_max", "rank_top_n"}
+# D1-D6 and D9-D11 work on one run and are run once for every run. D7 and D8 compare runs.
+PER_RUN = {
+    "threshold_compare", "condition_count", "proportion", "group_mean", "group_max", "rank_top_n",
+    "sensor_alert_count", "evidence_count", "count_check",
+}
 
 
 def derive(
     entry: dict, records: Sequence[Record], eligibility: Eligibility, config: DerivationConfig,
 ) -> dict | list[dict]:
-    """Run one derivations.yaml entry. Any type outside the eight is an error.
+    """Run one derivations.yaml entry. Any type outside the eleven is an error.
 
-    D1-D6 give a list, one output per run, oldest first, each with its run_id.
+    D1-D6 and D9-D11 give a list, one output per run, oldest first, each with its run_id.
     """
     kind = param(entry, "type")
     if kind not in DERIVATIONS:

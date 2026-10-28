@@ -74,9 +74,13 @@ HOW TO READ THE TABLES
   - annotated_image: an image with marks drawn on it
   - finding_image: the image of a finding made at the checkpoint; finding_id
     says which finding
-- What an image shows beyond its kind (a thermal image, a direction it
-  faces) is only in its file name: match it with LIKE on image_path, e.g.
-  e.image_path LIKE '%thermal%'.
+- e.is_thermal is 1 for a thermal image and 0 for an RGB one, read from the
+  file name. It applies to every kind.
+- e.resolves is 1 when the image file is there and opens as an image, and 0
+  when it is missing, empty or will not open. It is NULL when the files were
+  not checked.
+- Anything else an image shows (a direction it faces) is only in its file
+  name: match it with LIKE on image_path.
 - c.status is COMPLETED or MISSED: use it when the question asks why a
   checkpoint has no images.
 
@@ -87,8 +91,11 @@ Questions use everyday words for these; match them to the columns:
 - "annotated", "marked up", "labelled": e.kind = 'annotated_image'.
 - "images of the findings", "the image of finding <id>": e.kind =
   'finding_image', filtered on e.finding_id when one is named.
-- "thermal", "infrared", or any other kind of picture the file names carry:
-  LIKE on e.image_path.
+- "thermal", "infrared": e.is_thermal = 1. "RGB", "colour", "not thermal":
+  e.is_thermal = 0.
+- "broken", "missing", "failed", "will not open", "do not resolve":
+  e.resolves = 0. "working", "available", "resolve": e.resolves = 1.
+- Any other kind of picture the file names carry: LIKE on e.image_path.
 - "how many images", "which checkpoint has the most": worked out from
   several rows and not in these tables: abstain.
 
@@ -118,9 +125,10 @@ RULES FOR THE QUERY
 - Select stored columns only. No COUNT, SUM, AVG, MIN or MAX, and no
   arithmetic. Filtering, LIKE, LEFT JOIN, ORDER BY, LIMIT and subqueries are
   fine.
-- Never select e.kind, e.finding_id, e.zone, e.checkpoint_id or e.position:
-  code cannot find them in the records. Filter on them in WHERE; take the
-  checkpoint and zone from checkpoints (c.checkpoint_id, c.zone).
+- Never select e.kind, e.finding_id, e.zone, e.checkpoint_id, e.position,
+  e.is_thermal or e.resolves: code cannot find them in the records. Filter
+  on them in WHERE; take the checkpoint and zone from checkpoints
+  (c.checkpoint_id, c.zone).
 - Path columns, so code can find each value in the records: r.path AS path_r
   for run_id; c.path AS path_c for any column from checkpoints; e.path AS
   path_e for image_path.
@@ -140,7 +148,14 @@ The thermal images in <zone>:
          e.path AS path_e, c.path AS path_c, r.path AS path_r
   FROM evidence e JOIN runs r ON r.run_id = e.run_id
   JOIN checkpoints c ON c.run_id = e.run_id AND c.checkpoint_id = e.checkpoint_id
-  WHERE e.run_id IN (<run_ids>) AND e.zone IN ('<zone>') AND e.image_path LIKE '%thermal%'
+  WHERE e.run_id IN (<run_ids>) AND e.zone IN ('<zone>') AND e.is_thermal = 1
+  ORDER BY r.run_order, c.position, e.kind, e.position
+The images at <checkpoint> that do not resolve:
+  SELECT r.run_id, c.checkpoint_id, e.image_path,
+         e.path AS path_e, c.path AS path_c, r.path AS path_r
+  FROM evidence e JOIN runs r ON r.run_id = e.run_id
+  JOIN checkpoints c ON c.run_id = e.run_id AND c.checkpoint_id = e.checkpoint_id
+  WHERE e.run_id IN (<run_ids>) AND e.checkpoint_id IN ('<checkpoint>') AND e.resolves = 0
   ORDER BY r.run_order, c.position, e.kind, e.position
 The annotated images at <checkpoint>:
   SELECT r.run_id, c.checkpoint_id, e.image_path,

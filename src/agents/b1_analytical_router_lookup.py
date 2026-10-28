@@ -54,8 +54,9 @@ DESCRIPTIONS = {
     ),
     "evidence": (
         "the image files each checkpoint captured, as recorded: its evidence images, annotated images, "
-        "and images of findings made there. For \"which images were taken at <checkpoint>\", \"the "
-        "thermal images at <checkpoint>\""
+        "and images of findings made there, whether each is thermal or RGB, and whether its file "
+        "works. For \"which images were taken at <checkpoint>\", \"the thermal images at "
+        "<checkpoint>\", \"which images at <checkpoint> are broken\""
     ),
 }
 assert set(DESCRIPTIONS) == set(TABLES), "every lookup table needs a description, and only those"

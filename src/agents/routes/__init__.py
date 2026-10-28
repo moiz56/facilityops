@@ -16,8 +16,8 @@ The router offers every type in PROMPTS (b1_analytical_router_derived.ROUTED_TYP
 """
 
 from agents.routes import (
-    condition_count, group_max, group_mean, proportion, rank_top_n, records, run_date_range, run_set_difference,
-    threshold_compare,
+    condition_count, count_check, evidence_count, group_max, group_mean, proportion, rank_top_n, records,
+    run_date_range, run_set_difference, sensor_alert_count, threshold_compare,
 )
 
 # Route -> the module holding its SQL writer prompt: each derivation type, and
@@ -32,4 +32,7 @@ PROMPTS = {
     rank_top_n.TYPE: rank_top_n,
     run_set_difference.TYPE: run_set_difference,
     run_date_range.TYPE: run_date_range,
+    sensor_alert_count.TYPE: sensor_alert_count,
+    evidence_count.TYPE: evidence_count,
+    count_check.TYPE: count_check,
 }

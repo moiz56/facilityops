@@ -1,0 +1,99 @@
+# What a customer can ask about the records, in their own words.
+#
+# B-1 answers "what can I ask", "help" and the like from this file. Code
+# writes the answer from it as written; the model never does, so the answer
+# only ever offers what is listed here.
+#
+# Every example must be a question B-1 can answer today. The comment after
+# each one names what answers it, so an example can be checked when a
+# derivation or lookup table changes.
+#
+# <checkpoint> and <zone> are filled in by code with a real checkpoint id and
+# zone from the runs being asked about, so the examples fit the records and
+# pass verification.
+
+catalogue_version: "1.0"
+
+intro: "These records cover the inspection runs of your route. You can ask about:"
+
+categories:
+  - name: Checkpoints and zones
+    description: >-
+      What happened at a checkpoint or in a zone: whether the robot reached
+      it, its result, its sensor readings and what was observed there.
+    examples:
+      - "What happened at <checkpoint> on the latest run?"     # records
+      - "What was the temperature at <checkpoint>?"            # lookup: checkpoint_readings
+      - "Which checkpoints are in <zone>?"                     # lookup: zones
+
+  - name: Results and status
+    description: >-
+      Which checkpoints passed or failed, how many were completed, and the
+      status of each finding.
+    examples:
+      - "Which checkpoints failed in the latest run?"          # condition_count
+      - "What share of checkpoints were completed?"            # proportion
+      - "How many findings need review?"                       # condition_count_finding_status
+
+  - name: Sensor readings
+    description: >-
+      Averages and peaks of temperature, vibration and particulate readings,
+      per zone or for the whole run, and which checkpoints went over a limit.
+    examples:
+      - "What was the average temperature in <zone>?"          # group_mean_temperature_c
+      - "Where was vibration highest in the latest run?"       # group_max_vibration_rms_g
+      - "What were the five highest PM2.5 readings?"           # rank_top_n_pm2_5
+      - "Which checkpoints went over the temperature limit?"   # threshold_compare
+
+  - name: Coverage
+    description: >-
+      What was missed and why, and which readings were left out because a
+      sensor was offline or faulty.
+    examples:
+      - "Which checkpoints were missed in the latest run, and why?"   # records
+      - "Why is there no PM2.5 reading at <checkpoint>?"              # lookup: checkpoint_readings
+
+  - name: Comparing runs
+    description: >-
+      Which checkpoints the latest run and the one before it had in common,
+      and which only one of them had.
+    examples:
+      - "Which checkpoints differ between the last two runs?"  # run_set_difference
+
+  - name: Findings and alerts
+    description: >-
+      What the runs found, where, how severe, and the action recorded with
+      each; and the sensor alerts logged, by severity.
+    examples:
+      - "What findings were logged in the latest run?"         # records
+      - "How many critical sensor alerts were there?"          # sensor_alert_count
+
+  - name: Evidence
+    description: >-
+      The images captured at each checkpoint: how many, which are thermal,
+      which files work, and which checkpoints captured none.
+    examples:
+      - "Which images were taken at <checkpoint>?"             # lookup: evidence
+      - "Which checkpoints captured no evidence?"              # evidence_count
+      - "How many thermal images were captured?"               # evidence_count
+
+  - name: The robot's own counts
+    description: >-
+      Whether the counts the robot reported for a run, and for the images at
+      each checkpoint, match what the run actually recorded.
+    examples:
+      - "Do the robot's reported counts match the run?"        # count_check
+
+  - name: The runs themselves
+    description: >-
+      How many runs there are, over what period, on which days, and when
+      each one started.
+    examples:
+      - "How many runs are there, and over what period?"       # run_date_range
+      - "On which days were runs taken?"                       # run_date_range
+      - "When did the latest run start?"                       # run_date_range
+
+not_answerable: >-
+  The records hold values, not reasons or judgements. They cannot say why
+  something happened, what will happen next, or whether something is safe,
+  normal or acceptable.

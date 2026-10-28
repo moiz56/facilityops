@@ -44,7 +44,7 @@ GROUPABLE = {f.name for f in fields(EligibleValue)} & {f.name for f in fields(Ex
 
 
 class UnknownDerivationError(ValueError):
-    """A derivations.yaml entry names a type that is not one of the eight."""
+    """A derivations.yaml entry names a type that is not one of the eleven."""
 
 
 # Derivation helpers
@@ -404,7 +404,9 @@ def hash_configs(*configs: dict) -> str:
     return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def derivation_config(report: dict, derivations: dict, config_hash: str) -> DerivationConfig:
+def derivation_config(
+    report: dict, derivations: dict, config_hash: str, evidence_root: Path | None = None,
+) -> DerivationConfig:
     decimals = report.get("decimals")
     if not isinstance(decimals, dict):
         raise ConfigError("missing required setting 'decimals'")
@@ -447,6 +449,7 @@ def derivation_config(report: dict, derivations: dict, config_hash: str) -> Deri
         derivation_set_version=str(derivations["derivation_set_version"]),
         extended_record_version=str(derivations["extended_record_version"]),
         config_hash=config_hash,
+        evidence_root=evidence_root,
     )
 
 
@@ -524,7 +527,7 @@ def agent_settings(agents: dict, name: str, switches: tuple[str, ...]) -> tuple[
 
 def b1_config(agents: dict) -> B1Config:
     """agents.yaml settings B-1 reads: its own entry, the temperature and the query limits."""
-    b1, switches, temperature = agent_settings(agents, "b1_analytical", ("enabled",))
+    b1, switches, temperature = agent_settings(agents, "b1_analytical", ("enabled", "pdf"))
     return B1Config(
         prompt_version=str(setting(b1, "b1_analytical", "prompt_version")),
         max_attempts=number_setting(b1, "b1_analytical", "max_attempts", whole=True),

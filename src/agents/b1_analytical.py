@@ -1,7 +1,8 @@
 """B-1 Analytical: answers a question over the records (section 8.1).
 
 First the retrieval router (b1_retrieval_router) decides whether the question
-needs a derivation, a lookup of values as recorded, or neither (abstain). A
+needs a derivation, a lookup of values as recorded, the intent catalogue
+("what can I ask", written by code in b1_catalogue), or none (abstain). A
 lookup takes the same steps as a derivation, over the lookup database: the
 lookup router (b1_analytical_router_lookup) names the tables, and the SQL
 writer writes one SELECT for each with that table's prompt (lookups/).
@@ -28,6 +29,7 @@ from datetime import datetime
 from agents.b1_analytical_prose import write_prose
 from agents.b1_analytical_router_derived import RECORDS, Route, RouteError, describe, route_question
 from agents.b1_analytical_router_lookup import route_lookup
+from agents.b1_catalogue import answer_catalogue
 from agents.b1_retrieval_router import RetrievalError, classify_question
 from agents.database_derivation import QueryError, run_query
 from agents.provider import Provider, ProviderError
@@ -73,10 +75,12 @@ class PlanError(ValueError):
 def answer_question(
     question: str, extended: ExtendedRecord, conn, provider: Provider, config: B1Config,
     derivation: DerivationConfig, verification: VerificationConfig, lookup_conn=None,
+    catalogue: dict | None = None,
 ) -> B1Result:
     """Answer one question from the derivation database (conn, from
-    database_derivation.open_database) or the lookup database (lookup_conn,
-    from database_lookup.open_lookup_database).
+    database_derivation.open_database), the lookup database (lookup_conn,
+    from database_lookup.open_lookup_database) or, for "what can I ask", the
+    intent catalogue (catalogue, from b1_catalogue.check_catalogue).
 
     Raises ValueError for an empty question or one longer than max_question_chars.
     """
@@ -107,6 +111,17 @@ def answer_question(
     before = retrieval.attempts
     if retrieval.kind == "abstain":
         return abstained(f"retrieval router: {retrieval.reason}", extended, verification, before, trace)
+    if retrieval.kind == "catalogue":
+        if catalogue is None:
+            return abstained("retrieval router: catalogue, but no intent catalogue was given",
+                             extended, verification, before, trace)
+        trace["answer_from"] = "catalogue"
+        output, result = answer_catalogue(catalogue, extended, verification)
+        if not result.passed:
+            log.warning("B-1 catalogue answer failed verification: %s", result.failures)
+            return B1Result("REFUSED_UNVERIFIABLE", None, result, None, before, "the answer did not verify",
+                            trace=trace)
+        return B1Result("OK", output, result, None, before, None, trace=trace)
     if retrieval.kind == "lookup":
         return answer_lookup(question, extended, lookup_conn, provider, config, derivation, verification, before,
                              trace)
@@ -454,16 +469,23 @@ def build_lines(
                 parts.append(f"{c.replace('_', ' ')} {cells[c]}")
                 continue
             slot_id = f"q{n}_r{r}_{c}"
-            values[slot_id] = cells[c]
             if FILL_AND_VERIFY:
-                slots[slot_id] = trace(cells[c], c, bases, extended, derivation)
+                path = trace(cells[c], c, bases, extended, derivation)
+                held = resolve(path.removesuffix(KEY), extended)[0]
+                # An excluded reading whose field the record holds nothing at,
+                # e.g. a checkpoint never reached (its sensor is null): the name
+                # has nothing to cite, so it is left out and the reason says why.
+                if path.endswith(KEY) and held is None and cells.get("reason"):
+                    continue
                 # A yes/no flag has no printed form (fill_slots refuses it), so
                 # the query is sent back now, while the SQL writer can still fix it.
-                if isinstance(resolve(slots[slot_id].removesuffix(KEY), extended)[0], bool):
+                if isinstance(held, bool):
                     raise PlanError(
                         f"{c} is a yes/no flag and cannot be shown; do not select it, "
                         f"filter on it in WHERE instead (e.g. {c} = 1)"
                     )
+                slots[slot_id] = path
+            values[slot_id] = cells[c]
             if c == "run_id":
                 run = cells[c]
                 lines.append(f"Run {{{{ {slot_id} }}}}")

@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents.b1_analytical import ABSTAIN, answer_question
+from agents.b1_answer_pdf import write_answer_pdf
+from agents.b1_catalogue import check_catalogue
 from agents.database_derivation import open_database
 from agents.database_lookup import open_lookup_database
 from agents.derivation import compute_eligibility, extend_record
@@ -23,6 +25,7 @@ from agents.utils import (
     print_b1_answer, print_b1_trace, print_runs, provider_config, verification_config,
 )
 from common.paths import load_config, setting
+from query.query_log import append_entry
 from query.scope import QueryContext, resolve
 
 
@@ -38,6 +41,11 @@ class Settings:
     provider: Provider
     database: Path
     lookup_database: Path
+    catalogue: dict                  # intent_catalogue.yaml, for "what can I ask"
+    report: dict                     # report.yaml: the answer PDF's stylesheet, page size and colour
+    b1_answers: Path                 # where the answer PDF is written
+    evidence_root: Path              # where the PDF's evidence image paths resolve
+    query_logs: Path                 # one <tenant_id>.logs file per tenant
 
 
 def load_settings(root: Path) -> Settings:
@@ -48,18 +56,39 @@ def load_settings(root: Path) -> Settings:
     derivations = load_config(config / "derivations.yaml")
     agents = load_config(config / "agents.yaml")
     tenants = load_config(config / "tenants.yaml")
+    catalogue = check_catalogue(load_config(config / "intent_catalogue.yaml"))
 
     load_env(root / ".env")
     return Settings(
         root=root,
         tenants=tenants,
-        derivation=derivation_config(report, derivations, hash_configs(report, derivations, tenants)),
+        derivation=derivation_config(report, derivations, hash_configs(report, derivations, tenants, catalogue)),
         verification=verification_config(agents, report, derivations),
         b1=b1_config(agents),
         provider=make_provider(provider_config(agents)),
         database=root / setting(paths, "agent", "database"),
         lookup_database=root / setting(paths, "agent", "lookup_database"),
+        catalogue=catalogue,
+        report=report,
+        b1_answers=root / setting(paths, "agent", "b1_answers"),
+        evidence_root=root / setting(paths, "agent", "evidence_root"),
+        query_logs=root / setting(paths, "agent", "query_logs"),
     )
+
+
+def log_answer(question: str, context: QueryContext, answer_envelope: dict, settings: Settings) -> None:
+    """Append one line for this question to the asking tenant's log."""
+    output = answer_envelope["output"] or {}
+    append_entry(settings.query_logs / f"{context.tenant_id}.logs", {
+        "tenant_id": context.tenant_id,
+        "asked_by": context.asked_by,
+        "asked_at": context.asked_at,
+        "question": question,
+        "intent": output.get("intent"),
+        "records_in_scope": output.get("records_in_scope"),
+        "status": answer_envelope["status"],
+        "answer": output.get("answer"),
+    })
 
 
 def ask(question: str, context: QueryContext, settings: Settings, verbose: bool = False) -> dict:
@@ -67,6 +96,9 @@ def ask(question: str, context: QueryContext, settings: Settings, verbose: bool 
 
     verbose prints what `agents.main --ask` prints, in the same order: the
     runs, the databases, the envelope, attempts, reason, trace and answer.
+    When settings.b1.pdf is on, the answer is also written as a PDF to
+    settings.b1_answers, as `agents.main --ask` does; not when no run is in
+    scope, as nothing was asked then.
 
     Raises ScopeError when the context does not resolve to a scope, and
     ValueError when B-1 is disabled or the question is empty or overlong.
@@ -78,6 +110,7 @@ def ask(question: str, context: QueryContext, settings: Settings, verbose: bool 
     if not records:
         output = {"answer": ABSTAIN, "citations": [], "records_consulted": [], "records_in_scope": 0}
         answer_envelope = envelope("B-1", None, settings.b1.prompt_version, [], "OK", output, None)
+        log_answer(question, context, answer_envelope, settings)
         if verbose:
             print("no runs in scope")
             print(json.dumps(answer_envelope, indent=2))
@@ -98,7 +131,7 @@ def ask(question: str, context: QueryContext, settings: Settings, verbose: bool 
 
     result = answer_question(
         question, extended, conn, settings.provider, settings.b1,
-        settings.derivation, settings.verification, lookup_conn,
+        settings.derivation, settings.verification, lookup_conn, settings.catalogue,
     )
     output = result.output
     if output is not None:
@@ -108,6 +141,7 @@ def ask(question: str, context: QueryContext, settings: Settings, verbose: bool 
         "B-1", settings.provider.model, settings.b1.prompt_version, run_ids,
         result.status, output, result.verification,
     )
+    log_answer(question, context, answer_envelope, settings)
 
     if verbose:
         print(json.dumps(answer_envelope, indent=2))
@@ -117,4 +151,11 @@ def ask(question: str, context: QueryContext, settings: Settings, verbose: bool 
         if result.trace:
             print_b1_trace(result.trace)
         print_b1_answer(result, extended)
+    if settings.b1.pdf:
+        path = write_answer_pdf(
+            question, result, answer_envelope, extended, settings.derivation, settings.report,
+            settings.b1_answers, settings.evidence_root,
+        )
+        if verbose:
+            print(f"\nanswer written to {path}")
     return answer_envelope

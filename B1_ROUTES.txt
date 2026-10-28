@@ -1,0 +1,246 @@
+B-1 ROUTES - HOW A QUESTION GETS ANSWERED, AND WHAT ROUTES EXIST
+=================================================================
+
+Taken from src/agents/b1_analytical.py, b1_retrieval_router.py,
+b1_analytical_router_derived.py, b1_analytical_router_lookup.py,
+src/agents/routes/ and src/agents/lookups/.
+
+There are 13 routes in all:
+  9 derivation-side routes (src/agents/routes/): one per derivation type (8),
+    plus `records`
+  4 lookup routes (src/agents/lookups/): one per lookup table
+
+See B1_DERIVATIONS.txt for the derivations and B1_SCHEMAS.txt for the tables.
+
+
+1. THE PATH OF A QUESTION
+-------------------------
+
+Step 1. Retrieval router (b1_retrieval_router.py)
+  The model picks one of three kinds. It does not answer.
+    derivation  a figure worked out over the runs, or a recorded detail the
+                lookup database does not hold (findings, alerts, events, the
+                run's details, missed reasons, notes)
+    lookup      values exactly as recorded, for named runs, zones or
+                checkpoints: a reading, a status, a zone, an image
+    abstain     neither can answer it: why, what will happen, advice, a
+                judgement (safe, normal, better), or anything not recorded
+                (costs, people, maintenance, other sites)
+
+Step 2a. Derivation router (b1_analytical_router_derived.py)
+  The model names the runs, zones, checkpoints and which routes the question
+  needs: any derivation instances from derivations.yaml, and/or `records`.
+  Code checks every name and turns run positions and dates into run_ids.
+  A name the records do not hold -> abstain.
+
+Step 2b. Lookup router (b1_analytical_router_lookup.py)
+  Same job for a lookup: the model names the runs, zones, checkpoints,
+  sensor fields and which lookup tables it needs. Uses the same rules for
+  runs, dates, zones and checkpoints as 2a (PLACES, resolve_runs, check_places).
+
+Step 3. SQL writer (one call per route)
+  For each route the router named, the model writes one SELECT using that
+  route's PROMPT, and sees only that route's tables.
+  - Derivation side: one call per derivation TYPE. Instances of the same
+    type share one call (e.g. mean temperature and mean vibration together).
+  - Lookup side: one call per table.
+  Code runs the SELECT through a guard: SELECT only, no COUNT/SUM/AVG/MIN/MAX,
+  no arithmetic, a short list of allowed functions.
+  If the query returns no rows, code runs the route's SUMMARY_SQL instead, so
+  "none" is stated from a stored value, not guessed.
+
+Step 4. Prose writer (b1_analytical_prose.py)
+  The model writes a lead-in sentence with no numbers in it.
+
+Step 5. Code writes the answer
+  The rows become a template, values are filled through fill_slots, and the
+  whole answer is verified against the records. An answer that does not
+  verify is not shown.
+
+Statuses an answer can end with:
+  OK                      answered and verified
+  DEGRADED_TEMPLATE_ONLY  facts verified and shown; no lead-in sentence
+  REFUSED_UNVERIFIABLE    no valid reply after max_attempts, or a value
+                          that did not trace
+  PROVIDER_UNAVAILABLE    the model could not be reached
+  An abstain shows "the records do not contain this".
+
+A bad reply at any step is sent back to the model with the reason, up to
+max_attempts calls.
+
+Tenant path: query.main / query.ask runs the same steps. The only difference
+is that the runs come from query.scope.resolve, so only one tenant's runs
+are loaded.
+
+
+2. DERIVATION-SIDE ROUTES (src/agents/routes/)
+----------------------------------------------
+
+Route                Module                 Tables the SQL writer sees        One row per run?
+-------------------  ---------------------  --------------------------------  ----------------
+records              records.py             runs + rec_* (6 tables)           yes
+threshold_compare    threshold_compare.py   runs + d1_*                       yes
+condition_count      condition_count.py     runs + d2_*                       yes
+proportion           proportion.py          runs + d3_*                       yes
+group_mean           group_mean.py          runs + d4_<routed instances>      yes
+group_max            group_max.py           runs + d5_<routed instances>      yes
+rank_top_n           rank_top_n.py          runs + d6_<routed instances>      yes
+run_set_difference   run_set_difference.py  runs + d7_*                       no (one for all runs)
+run_date_range       run_date_range.py      runs + d8_*                       no (one for all runs)
+
+What each is for:
+
+records
+  Not a derivation. What a run recorded: the run's own fields, what happened
+  at a checkpoint, findings, sensor alerts, the event log, a single eligible
+  reading, or why a reading is missing. Anything worked out goes to a
+  derivation instead.
+
+threshold_compare (D1)
+  "Which checkpoints went over the limit", "how many exceeded", "by how
+  much", "which stayed under". Only the field and limit set in config
+  (now temperature_c above 30.0).
+
+condition_count (D2)
+  "How many failed", "which failed", "out of how many", "which were left out
+  and why", "which were missed". Count by value: "how many findings by
+  status", a breakdown. Keeps failed and missed apart. "Did not pass" is
+  read as failed.
+
+proportion (D3)
+  "What share / percentage / fraction completed". Only the condition set in
+  config (now status COMPLETED).
+
+group_mean (D4)
+  "Mean / average <field> per zone", "in <zone>". A question about one
+  checkpoint gets its zone's mean.
+
+group_max (D5)
+  "Highest <field> per zone", "which reading it was and when".
+
+rank_top_n (D6)
+  "Top 5 <field> readings", "highest readings, ranked".
+
+run_set_difference (D7)
+  "Which checkpoints only the previous run had, only the latest had, both
+  had". Never better or worse.
+
+run_date_range (D8)
+  "When were the runs", "earliest / latest run", "how many days between",
+  "which days had a run".
+
+A question can need several routes at once, e.g. a mean and a count. Each
+gets its own SQL writer call, and the answer joins them.
+
+
+3. LOOKUP ROUTES (src/agents/lookups/)
+--------------------------------------
+
+All read the lookup database (output/b1_lookup_database.sqlite). All give
+one row per run. Nothing in them is worked out: no counts, averages,
+highest, rankings or comparisons.
+
+Route                Module                  Tables the SQL writer sees
+-------------------  ----------------------  -------------------------------------
+zones                zones.py                runs + zones + checkpoints
+checkpoints          checkpoints.py          runs + checkpoints
+checkpoint_readings  checkpoint_readings.py  runs + checkpoints + checkpoint_readings
+evidence             evidence.py             runs + checkpoints + evidence
+
+What each is for:
+
+zones
+  "Which zones did the route cover", "which zone comes first".
+
+checkpoints
+  "Was <checkpoint> completed", "what was <checkpoint>'s result", "which
+  zone is <checkpoint> in", "which checkpoints are in <zone>", "what order
+  does the route take".
+
+checkpoint_readings
+  "The temperature at <checkpoint>", "the accelerometer values at
+  <checkpoint>", "why is there no PM2.5 reading at <checkpoint>".
+  The reason a reading was left out is shown as code wrote it, uncited
+  (TEXT_COLUMNS = reason).
+
+evidence
+  "Which images were taken at <checkpoint>", "the thermal images at
+  <checkpoint>". Evidence images, annotated images, and images of findings.
+
+
+4. HOW THE ROUTERS KNOW WHAT EXISTS
+-----------------------------------
+
+Derivation router: offers every instance in derivations.yaml whose type has
+a module in routes/PROMPTS, plus `records`. Each is described in one line by
+describe() in b1_analytical_router_derived.py, built from its config. It
+also gets every zone with its checkpoints, and every day a run started on.
+
+Lookup router: offers every table in database_lookup.TABLES, described by
+DESCRIPTIONS in b1_analytical_router_lookup.py. Code checks that every table
+has a description and every description has a table.
+
+Retrieval router: gets the same one-line list of derivation instances, and
+the sensor fields by block.
+
+
+5. HOW TO EXTEND
+----------------
+
+A. A new instance of an existing derivation type: config only.
+   Add it to derivations.yaml. The router offers it, describe() writes its
+   line, and its route already exists. Nothing in routes/ changes.
+
+B. A new kind of question an existing route should handle: prompt only.
+   Edit that route's PROMPT in routes/<type>.py or lookups/<table>.py. Each
+   prompt has HOW TO READ THE TABLES, HOW MANY ROWS, RULES FOR THE QUERY and
+   EXAMPLES; add the rule or example where it fits. The condition_count
+   "did not pass" rule is an example of this.
+
+C. A new derivation route: only with a new derivation type (see
+   B1_DERIVATIONS.txt, part 6B). Needs a module in routes/ with TYPE, PROMPT,
+   TABLES (or tables()), SUMMARY_SQL (or summary_sql()), PER_RUN if it is not
+   per run, an entry in routes/__init__.py PROMPTS, and a branch in describe().
+
+D. A new lookup route: a new table in database_lookup.py (in SCHEMA and
+   TABLES, with its add_ function), a module in lookups/ with the same parts
+   as above, an entry in lookups/__init__.py PROMPTS, and a line in
+   DESCRIPTIONS. The assert stops it loading if DESCRIPTIONS is missed.
+
+E. Do not:
+   - add a route that works something out in SQL (no COUNT, SUM, AVG, MIN,
+     MAX or arithmetic): the figure must already be in a table
+   - name a derivation instance `records`
+   - let a lookup route combine or compare values: that is a derivation
+   - let any route say why, predict, advise or judge: that is abstain
+
+
+6. WHAT THE EXTENSION QUESTIONS (Q21-Q49) MEAN FOR ROUTES
+---------------------------------------------------------
+
+Already have a route:
+  Q21, Q24, Q25 (a checkpoint's details, notes, findings)  records
+  Q22 (checkpoints in a zone)                              checkpoints lookup
+  Q23 (sensor readings at a checkpoint)                    checkpoint_readings lookup
+  Q32, Q33 (evidence and thermal coverage)                 evidence lookup
+  Q26 (fails on the latest run)                            condition_count
+  Q29, Q31 (zone mean, hottest checkpoint)                 group_mean, group_max / rank_top_n
+  Q40 (overall result of the run)                          records (runs table)
+  Q42 (when last run)                                      run_date_range
+  Q44-Q49 (safe, compliant, cause, prediction, normal,
+           who is responsible)                             abstain at step 1
+
+Need config only (route exists, instance does not):
+  Q27 (alerts by severity), Q30 (findings by feature)      condition_count, count by value
+
+Need new work, no route can answer them today:
+  Q28 (share of images resolved)       images are not a derivation scope
+  Q34 (what could not be read)         no could_not_read table
+  Q35 (declared vs counted)            runs has the declared counts, but no
+                                       route sets them against computed ones
+  Q36, Q37 (new / repeated findings)   D7 compares checkpoints, not findings
+  Q38 (coverage change between runs)   D7 gives checkpoints only
+  Q39 (sensor blocks that dropped out) partly records (rec_exclusions), but
+                                       no comparison across runs
+  Q41 (findings with no action)        the action mapping is not in any table
+  Q43 (what can I ask)                 no route answers about the system itself

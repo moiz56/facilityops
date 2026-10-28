@@ -7,10 +7,24 @@
 
 data_dir: data_tenant              # the tenant corpus, relative to the project root
 record_patterns:
-  - "*/*/run.json"                 # data_tenant/<facility folder>/<run>/run.json
+  - "*/*/run.json"                 # data_tenant/<facility_id>/<run>/run.json
 
+# One tenant per facility. The sim_ tenants are simulator output with
+# fabricated readings.
 tenants:
   tenant_facility:
     facility_ids: [sis_facility_checkpoint_route]
   tenant_racks:
     facility_ids: [sis_racks_checkpoint_route]
+  se4_clubhouse_checkpoint_route:
+    facility_ids: [se4_clubhouse_checkpoint_route]
+  stretch3_checkpoint_route:
+    facility_ids: [stretch3_checkpoint_route]
+  facility_ops:
+    facility_ids: [facility_ops]
+  sim_facility_001:
+    facility_ids: [sim_facility_001]
+  sim_facility_002:
+    facility_ids: [sim_facility_002]
+  sim_facility_facilityops:
+    facility_ids: [sim_facility_facilityops]

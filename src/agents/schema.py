@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
 
 from common.schema import Record
 
@@ -33,6 +34,9 @@ class DerivationConfig:
       derivation_set_version, extended_record_version
     From main:
       config_hash:          sha256 of report.yaml and derivations.yaml
+      evidence_root:        where evidence image paths resolve (agent_path.yaml
+                            agent.evidence_root); None when not given, and D10
+                            then leaves resolved_count and unresolved_count out
     """
 
     subsystem_flags: dict[str, str]
@@ -52,6 +56,7 @@ class DerivationConfig:
     derivation_set_version: str
     extended_record_version: str
     config_hash: str
+    evidence_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -257,13 +262,14 @@ class ProviderConfig:
 class B1Config:
     """Every setting B-1 needs, read from agents.yaml once (utils.b1_config).
 
-    From agents.b1_analytical: enabled, prompt_version, max_attempts,
+    From agents.b1_analytical: enabled, pdf, prompt_version, max_attempts,
       max_question_chars
     From provider: temperature
     From database: max_rows, query_timeout_seconds (its timeout_seconds)
     """
 
     enabled: bool
+    pdf: bool                        # write each --ask answer as a PDF
     prompt_version: str
     max_attempts: int
     max_question_chars: int

@@ -119,6 +119,10 @@ Questions use everyday words for these; match them to the columns:
 - How many runs, on how many days, how many days had none: run_count,
   day_count, days_without_run.
 - Which days had runs, and how many each day: d8_days.
+- How many runs in a month or a span of days ("in October", "from 1 to 10
+  August", "last week of July"): d8_days filtered to those days, each day
+  with its run_count. No total for a month or a span is stored: list its
+  days. Never answer it with d.run_count, which is over every loaded run.
 - How many runs on one day, or whether there were any: d8_days filtered to
   that day.
 - Runs on a weekday or a weekend: d8_days filtered on weekday.
@@ -143,11 +147,22 @@ Fetch exactly as many rows as the question asks for, no more.
   dd.position LIMIT that number.
 - Never LIMIT a list the question asked for in full.
 
+FETCH ONLY WHAT WAS ASKED
+The answer is written from every column the query returns, so a column the
+question did not ask for ends up in the answer.
+- Fetch the part of the date range the question is about, never all of it.
+  "How many runs in October" is October's days; "when was the first run" is
+  earliest and earliest_run_id; neither needs the span, day_count or the
+  other days.
+- Listing days: select dd.date, dd.weekday and dd.run_count only. Never join
+  d8_run_date_range onto day rows: its counts are over every loaded run, so
+  they repeat on every row and read as the total for the days listed.
+- Select d8_run_date_range's counts (run_count, day_count, span_days,
+  days_without_run) only when the question is about the whole period.
+
 KEEP THE ANSWER COMPLETE
-The answer is written only from the rows the query returns, so give it the
-context it needs:
-- Listing days: also select d.day_count, d.span_days and d.days_without_run,
-  by joining d8_run_date_range to d8_days on instance.
+The answer is written only from the rows the query returns, so give it what
+it needs to make sense:
 - Listing the runs of a day: also select that day's dd.run_count, by joining
   d8_days on instance and date.
 - A day the question names, written with LIKE or BETWEEN, may have no run.
@@ -190,10 +205,14 @@ How often were runs taken:
   FROM d8_run_date_range d
   WHERE d.instance = '<instance>'
 On which days were runs taken, and how many each day:
-  SELECT d.day_count, d.span_days, d.days_without_run, dd.date, dd.weekday, dd.run_count,
-         d.reason, d.path AS path_d, dd.path AS path_dd
-  FROM d8_run_date_range d JOIN d8_days dd ON dd.instance = d.instance
-  WHERE d.instance = '<instance>'
+  SELECT dd.date, dd.weekday, dd.run_count, dd.path AS path_dd
+  FROM d8_days dd
+  WHERE dd.instance = '<instance>'
+  ORDER BY dd.position
+How many runs in October 2026 (its days, each with its count):
+  SELECT dd.date, dd.weekday, dd.run_count, dd.path AS path_dd
+  FROM d8_days dd
+  WHERE dd.instance = '<instance>' AND dd.date BETWEEN '2026-10-01' AND '2026-10-31'
   ORDER BY dd.position
 Were there runs on 10 August (a day that may have none):
   SELECT d.day_count, dd.date, dd.run_count, d.reason, d.path AS path_d, dd.path AS path_dd

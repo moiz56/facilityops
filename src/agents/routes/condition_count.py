@@ -100,6 +100,9 @@ QUESTION USES), the two sit in different tables and never mix:
 So:
 - "failed", "did not pass", "FAIL": d2_matching_ids, or count for how many.
   Never add the missed checkpoints to them.
+- "Did not pass" and "failed" are the same thing: a question about
+  checkpoints that did not pass asks for the failed ones. Read it like
+  "failed", never abstain on it as "items that did not meet the condition".
 - "missed", "skipped", "not reached", "not visited", "not inspected":
   d2_excluded_items filtered to x.reason = 'checkpoint status is MISSED'.
   Never read them from d2_matching_ids, and never call them failed.

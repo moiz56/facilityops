@@ -2,10 +2,10 @@
 #
 # Every derivation takes its parameters from here, never from a template, a
 # prompt or a caller. Each entry under `derivations` is one named instance: the
-# name is its key in the extended record's `values`, `type` is one of the eight
+# name is its key in the extended record's `values`, `type` is one of the eleven
 # permitted derivations. Any other type raises UnknownDerivationError.
-# D1-D6 run once for every run: their output is a list, oldest run first, each
-# entry carrying its run_id. D7 and D8 compare runs and give one output.
+# D1-D6 and D9-D11 run once for every run: their output is a list, oldest run
+# first, each entry carrying its run_id. D7 and D8 compare runs and give one output.
 
 derivation_set_version: "1.0"
 extended_record_version: "1.0"    # version of the extended record's serialised shape
@@ -47,12 +47,19 @@ conditions:
     equals: COMPLETED
 
 derivations:
-  threshold_compare:               # D1
+  threshold_compare_temperature:               # D1
     type: threshold_compare
     source: checkpoints            # scope names checkpoints, so this reads checkpoint readings
     scope: checkpoints  #for all checkpoints make it 'checkpoints'
     field_path: environment.temperature_c
     threshold: 30.0
+    direction: above
+  threshold_compare_vibration_rms_g:   # D1, vibration
+    type: threshold_compare
+    source: checkpoints
+    scope: checkpoints
+    field_path: accelerometer.vibration_rms_g
+    threshold: 0.5
     direction: above
   # D2: counts the items of `scope` in each run for which the named
   # condition holds. Output: count, matching_ids, population (items the
@@ -144,3 +151,19 @@ derivations:
   # D8: earliest and latest run start times across all runs, and the days between.
   run_date_range:
     type: run_date_range
+  # D9: the sensor alerts in each run: how many, and how many of each severity.
+  #   expected: severities always listed, with 0 when none has it; any other
+  #             severity found is listed too, verbatim
+  sensor_alert_count:
+    type: sensor_alert_count
+    expected: [warning, critical]
+  # D10: the evidence images in each run, and at each checkpoint: how many, how
+  # many are thermal or RGB (by file name), and how many resolve to a readable
+  # file under agent_path.yaml's agent.evidence_root and how many do not.
+  evidence_count:
+    type: evidence_count
+  # D11: whether the counts the robot declared are what the run's lists hold:
+  # the seven checkpoint and finding counts on the run, and each event's
+  # evidence_count against the visit it belongs to.
+  count_check:
+    type: count_check

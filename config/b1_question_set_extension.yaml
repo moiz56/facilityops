@@ -1,0 +1,664 @@
+# B-1 ANALYTICAL — QUESTION SET EXTENSION v1.1
+#
+# This file ADDS to b1_question_set.yaml v1.0. It does not replace it.
+# Same schema, so the two merge cleanly: Q01–Q20 are in the original file,
+# Q21–Q44 are here.
+#
+#   total intents      49   (Milestone 3 requires 40+)
+#   answerable         39
+#   must abstain       10
+#
+# The abstention proportion holds at about 20%, matching v1.0. That is
+# deliberate rather than incidental: a customer surface meets far more
+# unanswerable questions than a test harness does, so holding the ratio while
+# nearly tripling the intent count means six new abstentions — and they are the
+# ones most likely to be asked in anger. Is it safe. Is it compliant. What
+# caused it. When will it fail.
+#
+# `paraphrases` remain DEVELOPMENT FIXTURES, not test cases. They exist so you
+# do not build exact-string routing. Every intent here carries five or more.
+#
+# `requires_derivations` names values the agent READS from the extended record.
+# Only the eight permitted derivations appear. No intent here needs a ninth.
+
+set_version: "1.1"
+extends: "1.0"
+new_intents: 29
+total_intents: 49
+total_answerable: 39
+total_must_abstain: 10
+
+questions:
+
+  # ══ RETRIEVAL ════════════════════════════════════════════════════════════
+
+  - id: Q21 (ALREADY IMPLEMENTED)
+    category: retrieval
+    question: "What happened at checkpoint_4 on 28 July?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [checkpoints.checkpoint_id, checkpoints.timestamp, checkpoints.status,
+            checkpoints.result_status, checkpoints.observed, run_id, run_date]
+    answer_shape:
+      must_include: [run_id, timestamp, status, result_status, observed]
+      citations_required: true
+    paraphrases:
+      - "checkpoint 4 on the 28th"
+      - "what did cp4 show on july 28"
+      - "pull up checkpoint_4 from the 28/07 run"
+      - "results for checkpoint 4, 28 july"
+      - "how did checkpoint 4 do on the 28th"
+    notes: >
+      A date with no run on it returns that no run was recorded that day —
+      not the nearest run. Nearest-match on dates is the same failure as
+      nearest-match on intents.
+
+  - id: Q22
+    category: retrieval
+    question: "Which checkpoints are in zone checkpoint_3?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [checkpoints.zone, checkpoints.checkpoint_id, checkpoints.sequence_number]
+    answer_shape:
+      must_include: [checkpoint_ids, zone]
+      citations_required: true
+    paraphrases:
+      - "what's in zone 3"
+      - "list the checkpoints for that zone"
+      - "which stops belong to checkpoint_3 zone"
+      - "zone 3 contents"
+      - "show me everything in that zone"
+
+  - id: Q23
+    category: retrieval
+    question: "What sensor readings were recorded at checkpoint_1?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [checkpoints.sensor.environment, checkpoints.sensor.accelerometer,
+            checkpoints.sensor.raw, checkpoints.sensor.ok, checkpoints.sensor.age_seconds]
+    answer_shape:
+      must_include: [available_blocks, values, unavailable_blocks_with_reason]
+      citations_required: true
+    paraphrases:
+      - "sensor data for checkpoint 1"
+      - "what did the hub read at cp1"
+      - "readings at checkpoint_1"
+      - "temperature and vibration at checkpoint 1"
+      - "show the sensor block for cp1"
+    notes: >
+      Blocks whose governing device flag is false are reported as unavailable
+      WITH the flag named. The placeholder values behind them are never shown.
+      On the current corpus this means particulate is always named unavailable.
+
+  - id: Q24
+    category: retrieval
+    question: "What operator notes are recorded against checkpoint_1?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [checkpoints.notes, checkpoints.checkpoint_id]
+    answer_shape:
+      must_include: [notes_verbatim, checkpoint_id]
+      citations_required: true
+    paraphrases:
+      - "any notes on checkpoint 1"
+      - "what did the operator write for cp1"
+      - "comments on checkpoint_1"
+      - "notes field for checkpoint 1"
+      - "did anyone leave a note there"
+    notes: >
+      Notes render VERBATIM. They are not summarised, not cleaned up, and not
+      promoted into findings. Developer and scaffolding text appears as written.
+
+  - id: Q25
+    category: retrieval
+    question: "What findings are recorded at checkpoint_4?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [findings.checkpoint_id, findings.feature, findings.severity,
+            findings.status, findings.recommended_action]
+    answer_shape:
+      must_include: [finding_ids, feature, severity, status, recommended_action]
+      citations_required: true
+    paraphrases:
+      - "findings at checkpoint 4"
+      - "what's flagged at cp4"
+      - "issues recorded for checkpoint_4"
+      - "anything found at checkpoint 4"
+      - "show findings for that checkpoint"
+    notes: >
+      `recommended_action` is quoted from the record. The agent does not
+      extend, improve or interpret it.
+
+  # ══ AGGREGATION ══════════════════════════════════════════════════════════
+
+  - id: Q26 (THIS IS ALREADY IMPLEMENTED NO CHANGES NEEDED)
+    category: aggregation
+    question: "How many checkpoints failed on the most recent run?"
+    must_abstain: false
+    requires_derivations: [condition_count]
+    reads: [derived.values.checkpoint_fail_count]
+    answer_shape:
+      must_include: [count, matching_ids, population]
+      citations_required: true
+    paraphrases:
+      - "how many failures last run"
+      - "count the fails"
+      - "number of failed checkpoints"
+      - "how many didn't pass"
+      - "failure count for the latest run"
+
+  - id: Q27 (IMPLEMENTED)
+    category: aggregation
+    question: "How many sensor alerts were logged, by severity?"
+    must_abstain: false
+    requires_derivations: [condition_count]
+    reads: [sensor_alerts.severity, sensor_alerts.code]
+    answer_shape:
+      must_include: [count_by_severity, total]
+      citations_required: true
+    paraphrases:
+      - "alert breakdown"
+      - "how many critical alerts"
+      - "sensor alerts by severity"
+      - "count the warnings and criticals"
+      - "how many alerts fired"
+    notes: >
+      Report every severity including zeros. An unrecognised severity value is
+      reported verbatim as its own row, never folded into a known one.
+
+  - id: Q28
+    category: aggregation
+    question: "What proportion of referenced images resolved?"
+    must_abstain: false
+    requires_derivations: [proportion]
+    reads: [derived.values.image_resolution_proportion]
+    answer_shape:
+      must_include: [numerator, denominator, percentage]
+      citations_required: true
+    paraphrases:
+      - "how many photos actually exist"
+      - "image resolution rate"
+      - "what percentage of images resolved"
+      - "did all the pictures land"
+      - "missing image count as a proportion"
+
+  - id: Q29 (IMPLEMENTED ALREADY)
+    category: aggregation
+    question: "Which zone had the highest average temperature?"
+    must_abstain: false
+    requires_derivations: [group_mean]
+    reads: [derived.values.zone_mean_temperature]
+    answer_shape:
+      must_include: [zone, mean, n]
+      citations_required: true
+    paraphrases:
+      - "hottest zone on average"
+      - "which area runs warmest"
+      - "average temperature by zone, highest"
+      - "warmest part of the route"
+      - "zone with the highest mean temp"
+    notes: >
+      Report `n` for the winning group. Zones in this corpus differ by an order
+      of magnitude in sample count — 8 against 51 — and a mean over 8 is a
+      different claim from a mean over 51.
+ 
+  - id: Q30 (TO FIX)
+    category: aggregation
+    question: "How many findings were recorded, by feature?"
+    must_abstain: false
+    requires_derivations: [condition_count]
+    reads: [findings.feature]
+    answer_shape:
+      must_include: [count_by_feature, total]
+      citations_required: true
+    paraphrases:
+      - "findings grouped by type"
+      - "what kinds of issues came up"
+      - "breakdown of findings by feature"
+      - "how many of each finding type"
+      - "finding categories and counts"
+    notes: >
+      An unrecognised feature is its own row, reported verbatim. Features that
+      sound like synonyms are never merged — `airflow_obstruction` and
+      `blocked_airflow_path` are separate rows.
+
+  - id: Q31 (IMPLEMENTED)
+    category: aggregation
+    question: "Which checkpoint recorded the highest temperature?"
+    must_abstain: false
+    requires_derivations: [group_max]
+    reads: [derived.values.zone_max_temperature]
+    answer_shape:
+      must_include: [checkpoint_id, value, source_id]
+      citations_required: true
+    paraphrases:
+      - "hottest checkpoint"
+      - "where was it warmest"
+      - "max temperature reading and where"
+      - "peak temp location"
+      - "which stop ran hottest"
+
+  # ══ COVERAGE ═════════════════════════════════════════════════════════════
+
+  - id: Q32 (IMPLEMENTED)
+    category: coverage 
+    question: "Which checkpoints captured no evidence?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [checkpoints.evidence_images, checkpoints.observed, checkpoints.checkpoint_id]
+    answer_shape:
+      must_include: [checkpoint_ids, observed_value]
+      citations_required: true
+    paraphrases:
+      - "where are we missing photos"
+      - "checkpoints with no images"
+      - "which stops have no evidence"
+      - "any checkpoint without captures"
+      - "no-evidence checkpoints"
+
+  - id: Q33 (IMPLEMENTED but question need to be properly asked)
+    category: coverage
+    question: "What thermal coverage exists on the most recent run?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [checkpoints.evidence_images]
+    answer_shape:
+      must_include: [per_checkpoint_rgb_count, per_checkpoint_thermal_count, directions_missing_thermal]
+      citations_required: true
+    paraphrases:
+      - "do we have thermal everywhere"
+      - "thermal image coverage"
+      - "which directions are missing thermal"
+      - "how complete is the thermal capture"
+      - "ir coverage for this run"
+    notes: >
+      Coverage only. This intent reports which thermal images EXIST. It says
+      nothing about what they contain — no temperatures, no hot spots. Thermal
+      as a measurement is a separate workstream and is not routed here.
+
+  - id: Q34 (IMPLEMENTED)
+    category: coverage
+    question: "What could not be read on the most recent run?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [could_not_read.item_id, could_not_read.subject, could_not_read.reason]
+    answer_shape:
+      must_include: [item_ids, subject, reason, detail]
+      citations_required: true
+    paraphrases:
+      - "anything unreadable"
+      - "what couldn't the robot read"
+      - "failed readings"
+      - "which gauges were unreadable"
+      - "list the could-not-read entries"
+    notes: >
+      Distinct from a gap. The evidence is present and unreadable, not absent.
+      Zero entries is a valid answer and is stated plainly.
+
+  - id: Q35
+    category: coverage
+    question: "Do the declared counts match the checkpoints in the record?"
+    must_abstain: false
+    requires_derivations: [condition_count]
+    reads: [total_required_checkpoints, total_completed_checkpoints, passed_checkpoints,
+            failed_checkpoints, missed_checkpoints, warned_checkpoints, finding_count]
+    answer_shape:
+      must_include: [declared, computed, conflicts]
+      citations_required: true
+    paraphrases:
+      - "does the record add up"
+      - "any count mismatches"
+      - "do the numbers reconcile"
+      - "check the declared totals"
+      - "is the summary consistent with the data"
+    notes: >
+      Both figures are reported; neither is preferred. On the reference run
+      this surfaces the warned-checkpoint conflict — declared 0 against 7
+      checkpoints carrying sensor warnings.
+
+  # ══ COMPARISON ═══════════════════════════════════════════════════════════
+
+  - id: Q36
+    category: comparison
+    question: "Which findings are new since the previous run?"
+    must_abstain: false
+    requires_derivations: [run_set_difference]
+    reads: [derived.values.run_differences, findings.finding_id, findings.feature]
+    answer_shape:
+      must_include: [finding_ids, feature, checkpoint_ids]
+      citations_required: true
+    paraphrases:
+      - "new issues this time"
+      - "what's come up since last run"
+      - "findings that weren't there before"
+      - "any new problems"
+      - "newly flagged items"
+
+  - id: Q37
+    category: comparison
+    question: "Which findings appear in both of the last two runs?"
+    must_abstain: false
+    requires_derivations: [run_set_difference]
+    reads: [derived.values.run_differences, findings.checkpoint_id, findings.feature]
+    answer_shape:
+      must_include: [finding_pairs, checkpoint_ids, feature]
+      citations_required: true
+    paraphrases:
+      - "recurring findings"
+      - "what keeps showing up"
+      - "issues present both times"
+      - "persistent problems"
+      - "same findings as last run"
+    notes: >
+      A finding present in both rounds is persisting. A finding absent in the
+      later round is ABSENT, not resolved and not fixed — those are
+      determinations the records do not support.
+
+  - id: Q38
+    category: comparison
+    question: "How did coverage change between the last two runs?"
+    must_abstain: false
+    requires_derivations: [run_set_difference, condition_count]
+    reads: [derived.values.run_differences, checkpoints.status, checkpoints.evidence_images]
+    answer_shape:
+      must_include: [evidence_counts_both_runs, missed_both_runs, could_not_read_both_runs]
+      citations_required: true
+    paraphrases:
+      - "coverage difference between runs"
+      - "did we capture more or less this time"
+      - "compare coverage across the two rounds"
+      - "how complete was this run versus last"
+      - "coverage delta"
+    notes: >
+      States the figures for both runs and the signed difference. **Does not
+      characterise it** — no "better", "worse", "improved".
+
+  - id: Q39
+    category: comparison
+    question: "Which sensor blocks were available last run but not this one?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [checkpoints.sensor.raw, checkpoints.sensor.ok, extended.excluded]
+    answer_shape:
+      must_include: [block_names, governing_flag, affected_checkpoints, both_runs]
+      citations_required: true
+    paraphrases:
+      - "did any sensors drop out"
+      - "sensors working last time but not now"
+      - "what stopped reporting"
+      - "sensor availability change"
+      - "new sensor failures since last run"
+
+  # ══ STATUS AND EVIDENCE ══════════════════════════════════════════════════
+
+  - id: Q40
+    category: status
+    question: "What is the overall result of the most recent run?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [final_status, run_status, duration, start_time, end_time]
+    answer_shape:
+      must_include: [final_status, run_status, duration]
+      citations_required: true
+    paraphrases:
+      - "how did the last run go"
+      - "did it pass"
+      - "overall result"
+      - "run outcome"
+      - "summary of the latest inspection"
+
+  - id: Q41
+    category: status
+    question: "Which findings have no configured action?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [findings.feature, findings.finding_id, action_mapping]
+    answer_shape:
+      must_include: [finding_ids, feature, statement]
+      citations_required: true
+    paraphrases:
+      - "anything we don't know how to handle"
+      - "unmapped findings"
+      - "findings without a recommended action"
+      - "which issues have no action defined"
+      - "gaps in the action mapping"
+    notes: >
+      Reports unmapped features plainly. **Never maps a finding to a
+      similar-sounding feature's action to fill the gap.**
+
+  - id: Q42
+    category: corpus
+    question: "When was this route last run?"
+    must_abstain: false
+    requires_derivations: [run_date_range]
+    reads: [derived.values.run_span, run_id, start_time]
+    answer_shape:
+      must_include: [run_id, date, days_since]
+      citations_required: true
+    paraphrases:
+      - "last inspection date"
+      - "when did we last do this route"
+      - "how long since the last run"
+      - "most recent run date"
+      - "when was this checked last"
+
+  - id: Q43
+    category: corpus
+    question: "What questions can I ask about these records?"
+    must_abstain: false
+    requires_derivations: []
+    reads: [intent_catalogue]
+    answer_shape:
+      must_include: [categories, example_questions]
+      citations_required: false
+    paraphrases:
+      - "what can you tell me"
+      - "what do you know about"
+      - "help"
+      - "what kind of questions work here"
+      - "show me what I can ask"
+    notes: >
+      The only intent where citations are not required, because the answer is
+      about the system rather than about a record. Answer from the intent
+      catalogue by category with one example each. **Do not invent capabilities
+      the catalogue does not contain** — this question is exactly where an
+      overclaim gets made and then held against us.
+
+  # ══ MUST ABSTAIN — 6 NEW ═════════════════════════════════════════════════
+  # Correct output is: "the records do not contain this"
+
+  - id: Q44
+    category: abstain_determination
+    question: "Is the equipment at checkpoint_4 safe to operate?"
+    must_abstain: true
+    abstain_reason: >
+      A safety determination. The system reports findings; whether equipment is
+      safe is decided by a qualified person against a full picture the robot
+      does not have. Rule 1.
+    paraphrases:
+      - "is it safe"
+      - "can we keep running that equipment"
+      - "is checkpoint 4 dangerous"
+      - "should we shut it down"
+      - "is there a safety risk there"
+    notes: >
+      The most dangerous question in the set, because the agent HAS findings
+      with severity `fail` and could assemble something that reads like an
+      answer. It must not.
+
+  - id: Q45
+    category: abstain_determination
+    question: "Is this facility compliant with NFPA 70B?"
+    must_abstain: true
+    abstain_reason: >
+      A compliance determination. Evidence can be presented against a clause;
+      compliance is certified by a qualified person, never by this system.
+    paraphrases:
+      - "are we compliant"
+      - "does this pass nfpa 70b"
+      - "will this satisfy the auditor"
+      - "are we meeting the standard"
+      - "compliance status"
+    notes: >
+      Abstain on the determination, then say what the records DO hold —
+      inspection evidence that can be mapped to clauses. That is useful and
+      is not an answer to the question asked.
+
+  - id: Q46
+    category: abstain_causation
+    question: "What caused the finding at checkpoint_4?"
+    must_abstain: true
+    abstain_reason: >
+      Causation. The records hold what was observed, not why. Any cause the
+      agent offers is invented.
+    paraphrases:
+      - "why did that happen"
+      - "what's behind the issue at cp4"
+      - "root cause for checkpoint 4"
+      - "how did that get blocked"
+      - "what's causing this"
+
+  - id: Q47
+    category: abstain_prediction
+    question: "When will the equipment at checkpoint_6 need replacing?"
+    must_abstain: true
+    abstain_reason: >
+      Prediction, and a capital-planning one. Not in the data at any horizon.
+    paraphrases:
+      - "how long before we replace it"
+      - "remaining life on that unit"
+      - "when does it need changing"
+      - "replacement timeline"
+      - "how much life is left"
+
+  - id: Q48
+    category: abstain_determination
+    question: "Is a vibration reading of 2.9 g normal for this equipment?"
+    must_abstain: true
+    abstain_reason: >
+      Requires a manufacturer baseline or an engineering standard for that
+      equipment type. The records hold readings, not what those readings
+      should be.
+    paraphrases:
+      - "is 2.9 g high"
+      - "should I worry about that vibration"
+      - "is that reading within spec"
+      - "what's normal for this kind of unit"
+      - "is that a bad number"
+    notes: >
+      Subtle, and the one most likely to be answered by accident. The agent can
+      state that a value exceeded a CONFIGURED threshold — that is Q04 and it is
+      answerable. It cannot say whether the value is normal for the equipment,
+      because no baseline for the equipment exists in the records.
+
+  - id: Q49
+    category: abstain_not_captured
+    question: "Who was responsible for the obstruction at checkpoint_4?"
+    must_abstain: true
+    abstain_reason: >
+      Not captured. The records hold inspection data, not personnel,
+      contractors, work orders or access logs.
+    paraphrases:
+      - "who left that there"
+      - "which crew caused this"
+      - "who's responsible"
+      - "whose fault is the blockage"
+      - "which vendor was working in that aisle"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# NEW BOUNDARY PAIRS — development fixtures, not test cases
+#
+# These extend the six in v1.0. Each pair differs by a word or two and lands on
+# opposite sides of the line. Build against these before calling routing done.
+# ═══════════════════════════════════════════════════════════════════════════
+
+boundary_pairs:
+
+  - theme: threshold breach vs equipment norm
+    answerable: "Which checkpoints exceeded the configured vibration threshold?"
+    abstains:   "Is a vibration reading of 2.9 g normal for this equipment?"
+    line: >
+      A configured threshold is in the config and the comparison is a
+      derivation. What is normal FOR THE EQUIPMENT needs a baseline that
+      exists nowhere in the records.
+
+  - theme: evidence against a clause vs compliance
+    answerable: "Which findings relate to electrical maintenance clauses?"
+    abstains:   "Is this facility compliant with NFPA 70B?"
+    line: >
+      Mapping a finding to a clause is retrieval. Certifying compliance is a
+      determination made by a qualified person.
+
+  - theme: finding severity vs safety
+    answerable: "Which findings are recorded at severity fail?"
+    abstains:   "Is the equipment at checkpoint_4 safe to operate?"
+    line: >
+      Severity is a field in the record. Safety is a judgement about the world.
+
+  - theme: absence vs resolution
+    answerable: "Which findings from the previous run are absent from this one?"
+    abstains:   "Which findings have been fixed since the last run?"
+    line: >
+      Absent is observable. Fixed asserts an action nobody recorded. The agent
+      may answer the first and must decline the second — including when the
+      questioner clearly means the same thing.
+
+  - theme: recorded action vs advice
+    answerable: "What recommended action is recorded against the findings at checkpoint_4?"
+    abstains:   "What should we prioritise fixing first?"
+    line: >
+      The first quotes the record. The second asks the agent to rank work by
+      its own judgement. Priority ordering exists in the action plan and is
+      computed from severity — quoting that is fine; inventing a recommendation
+      is not.
+
+  - theme: sensor unavailable vs sensor broken
+    answerable: "Which sensor blocks were unavailable, and why?"
+    abstains:   "Is the particulate sensor faulty?"
+    line: >
+      The records say a device flag was false. Whether the device is faulty,
+      disconnected, disabled or absent is not recorded.
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TENANT BOUNDARY PROBES — development fixtures for TQ-10 and TQ-11
+#
+# NOT intents. These are questions phrased to pull data across a tenant
+# boundary. Correct behaviour is an answer scoped to the asking tenant — NOT a
+# refusal, and NOT a filtered version of a broader answer.
+#
+# If any of these returns a figure computed over more than one tenant's
+# records, the milestone fails. Test them against a two-tenant corpus.
+# ═══════════════════════════════════════════════════════════════════════════
+
+tenant_probes:
+  - "Which facility has the highest average vibration?"
+  - "How many runs have been recorded in total?"
+  - "Across everything you have, what is the worst finding?"
+  - "Compare my facility to the others."
+  - "What is the average completion rate across all routes?"
+  - "List every checkpoint you know about."
+  - "How many customers are on this system?"
+  - "Show me the top five vibration readings anywhere."
+
+# ═══════════════════════════════════════════════════════════════════════════
+# NOTES ON SCOPE
+# ═══════════════════════════════════════════════════════════════════════════
+
+deferred:
+  thermal_measurement: >
+    Q33 reports thermal COVERAGE only — which images exist. Intents that read
+    temperatures out of the radiometric arrays are a separate workstream and
+    must not be added here. If that work lands, thermal measurement intents
+    will come as a v1.2 extension with their own derivation.
+
+  cross_run_depth: >
+    Q36 to Q39 compare two runs. Deeper longitudinal questions — continuity
+    over months, attribution of change — belong to the sealed-record milestone
+    and are not routed here.
+
+counts_check:
+  original_answerable: 16
+  original_abstain: 4
+  new_answerable: 23
+  new_abstain: 6
+  total: 49

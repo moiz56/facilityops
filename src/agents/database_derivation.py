@@ -505,7 +505,130 @@ CREATE TABLE d8_day_runs (
 );
 """
 
-SCHEMA = CORPUS + RUNS + RECORDS + D1 + D2 + D3 + D7 + D8
+D9 = """
+-- D9 sensor_alert_count: one row per instance and run: how many sensor alerts
+-- the run logged. The count for each severity is in d9_by_severity.
+CREATE TABLE d9_sensor_alert_count (
+    instance        TEXT NOT NULL,                       -- its name in derivations.yaml
+    run_id          TEXT NOT NULL REFERENCES runs,
+    status          TEXT NOT NULL,                       -- OK or NOT_COMPUTABLE
+    reason          TEXT,                                -- why, when NOT_COMPUTABLE
+    count           INTEGER,                             -- sensor alerts the run logged; 0 is a real count
+    path            TEXT NOT NULL,                       -- derived.values.<instance>[i]
+    PRIMARY KEY (instance, run_id)
+);
+
+-- D9 by severity: one row per severity in a run: the expected severities
+-- first (each listed, 0 when no alert has it), then any other severity found,
+-- verbatim. The counts add up to count in d9_sensor_alert_count.
+CREATE TABLE d9_by_severity (
+    instance        TEXT NOT NULL,
+    run_id          TEXT NOT NULL REFERENCES runs,
+    severity        TEXT NOT NULL,                       -- as recorded, e.g. critical
+    count           INTEGER NOT NULL,                    -- alerts with that severity; 0 is a real count
+    expected        INTEGER NOT NULL,                    -- 1: listed under expected in derivations.yaml; 0: found only
+    position        INTEGER NOT NULL,                    -- order in by_severity, 0 = first
+    path            TEXT NOT NULL,                       -- derived.values.<instance>[i].by_severity[position]
+    PRIMARY KEY (instance, run_id, position),
+    FOREIGN KEY (instance, run_id) REFERENCES d9_sensor_alert_count
+);
+"""
+
+D10 = """
+-- D10 evidence_count: one row per instance and run: how many evidence images
+-- the run captured, how many are thermal or RGB (by file name), and how many
+-- resolve to a readable file or do not. The same per checkpoint is in
+-- d10_by_checkpoint.
+CREATE TABLE d10_evidence_count (
+    instance          TEXT NOT NULL,                     -- its name in derivations.yaml
+    run_id            TEXT NOT NULL REFERENCES runs,
+    status            TEXT NOT NULL,                     -- OK or NOT_COMPUTABLE
+    reason            TEXT,                              -- why, when NOT_COMPUTABLE
+    count             INTEGER,                           -- images the run captured; 0 is a real count
+    thermal_count     INTEGER,                           -- of those, thermal by file name
+    rgb_count         INTEGER,                           -- of those, not thermal
+    resolved_count    INTEGER,                           -- of those, a readable file; NULL when not checked
+    unresolved_count  INTEGER,                           -- of those, missing, empty or unreadable; NULL when not checked
+    path              TEXT NOT NULL,                     -- derived.values.<instance>[i]
+    PRIMARY KEY (instance, run_id)
+);
+
+-- D10 per checkpoint: one row per checkpoint in a run, in route order, each
+-- listed even when it captured no images (count 0). A checkpoint visited
+-- twice is one row. The counts add up to those on d10_evidence_count.
+-- checkpoint_name and zone are copied from the checkpoint's first visit.
+CREATE TABLE d10_by_checkpoint (
+    instance          TEXT NOT NULL,
+    run_id            TEXT NOT NULL REFERENCES runs,
+    checkpoint_id     TEXT NOT NULL,
+    checkpoint_name   TEXT,                              -- as recorded, at path_record
+    zone              TEXT,                              -- as recorded, at path_record
+    count             INTEGER NOT NULL,                  -- images captured there; 0 is a real count
+    thermal_count     INTEGER NOT NULL,
+    rgb_count         INTEGER NOT NULL,
+    resolved_count    INTEGER,                           -- NULL when not checked
+    unresolved_count  INTEGER,                           -- NULL when not checked
+    position          INTEGER NOT NULL,                  -- route order in the run, 0 = first
+    path              TEXT NOT NULL,                     -- derived.values.<instance>[i].by_checkpoint[position]
+    path_record       TEXT NOT NULL,                     -- records[i].checkpoints[j]: the checkpoint's first visit
+    PRIMARY KEY (instance, run_id, checkpoint_id),
+    FOREIGN KEY (instance, run_id) REFERENCES d10_evidence_count
+);
+"""
+
+D11 = """
+-- D11 count_check: one row per instance and run: how many of the counts the
+-- robot declared do not match what the run's lists hold. Each check is in
+-- d11_counts (the run's seven counts) or d11_evidence (each event's evidence count).
+CREATE TABLE d11_count_check (
+    instance          TEXT NOT NULL,                     -- its name in derivations.yaml
+    run_id            TEXT NOT NULL REFERENCES runs,
+    status            TEXT NOT NULL,                     -- OK or NOT_COMPUTABLE
+    reason            TEXT,                              -- why, when NOT_COMPUTABLE
+    mismatch_count    INTEGER,                           -- checks in both tables that do not match; 0 is a real count
+    path              TEXT NOT NULL,                     -- derived.values.<instance>[i]
+    PRIMARY KEY (instance, run_id)
+);
+
+-- D11 per count: one row per count the robot declares on the run, all seven
+-- always listed. counted is taken from the run's lists: every entry in
+-- checkpoints counts, so a checkpoint passed twice on a round trip counts twice.
+CREATE TABLE d11_counts (
+    instance          TEXT NOT NULL,
+    run_id            TEXT NOT NULL REFERENCES runs,
+    field             TEXT NOT NULL,                     -- e.g. total_required_checkpoints, warned_checkpoints, finding_count
+    declared          INTEGER,                           -- what the robot declared; NULL when it declared nothing
+    counted           INTEGER NOT NULL,                  -- what the run's lists hold
+    matches           INTEGER,                           -- 1 or 0; NULL when nothing was declared
+    position          INTEGER NOT NULL,                  -- order in counts, 0 = first
+    path              TEXT NOT NULL,                     -- derived.values.<instance>[i].counts[position]
+    PRIMARY KEY (instance, run_id, field),
+    FOREIGN KEY (instance, run_id) REFERENCES d11_count_check
+);
+
+-- D11 per event: one row per event_log entry with a checkpoint and an
+-- evidence_count, in log order. The nth event for a checkpoint is matched to
+-- its nth visit. checkpoint_id and checkpoint_name are copied from the event.
+CREATE TABLE d11_evidence (
+    instance          TEXT NOT NULL,
+    run_id            TEXT NOT NULL REFERENCES runs,
+    checkpoint_id     TEXT NOT NULL,                     -- as recorded on the event, at path_record
+    checkpoint_name   TEXT,                              -- as recorded on the event, at path_record
+    event             INTEGER NOT NULL,                  -- the event's position in event_log, 0 = first
+    visit             INTEGER,                           -- the matched visit's position in checkpoints; NULL when none
+    declared          INTEGER NOT NULL,                  -- the event's evidence_count
+    counted           INTEGER,                           -- evidence_images on the matched visit; NULL when none
+    matches           INTEGER NOT NULL,                  -- 1 or 0; 0 when there is no matched visit
+    position          INTEGER NOT NULL,                  -- order in evidence, 0 = first
+    path              TEXT NOT NULL,                     -- derived.values.<instance>[i].evidence[position]
+    path_record       TEXT NOT NULL,                     -- records[i].event_log[event]: the event
+    path_visit        TEXT,                              -- records[i].checkpoints[visit]; NULL when none
+    PRIMARY KEY (instance, run_id, event),
+    FOREIGN KEY (instance, run_id) REFERENCES d11_count_check
+);
+"""
+
+SCHEMA = CORPUS + RUNS + RECORDS + D1 + D2 + D3 + D7 + D8 + D9 + D10 + D11
 
 
 def d4_schema(config: DerivationConfig, names: Sequence[str] | None = None) -> str:
@@ -555,6 +678,9 @@ def build_database(extended: ExtendedRecord, config: DerivationConfig) -> sqlite
     add_d6(conn, extended.records, extended.derived.values, config)
     add_d7(conn, extended.derived.values)
     add_d8(conn, extended.derived.values)
+    add_d9(conn, extended.derived.values)
+    add_d10(conn, extended.records, extended.derived.values)
+    add_d11(conn, extended.records, extended.derived.values)
     add_records(conn, extended, config)
     conn.commit()
     # Built once, then read-only.
@@ -919,6 +1045,79 @@ def add_d8(conn: sqlite3.Connection, values: dict) -> None:
 
 # rec_ table -> (the Record list it reads, the item fields it copies). Each
 # column is the field's own name, so a cited value is <path>.<column>.
+def add_d9(conn: sqlite3.Connection, values: dict) -> None:
+    """d9_sensor_alert_count: one row per run; d9_by_severity: one per severity."""
+    for instance, outputs in instances(values, "sensor_alert_count"):
+        for k, out in enumerate(outputs):
+            path = f"derived.values.{instance}[{k}]"
+            insert(conn, "d9_sensor_alert_count", {"instance": instance, "path": path, **stored(out, "by_severity")})
+            for position, entry in enumerate(out.get("by_severity", [])):
+                insert(conn, "d9_by_severity", {
+                    "instance": instance, "run_id": out["run_id"], "severity": str(entry["severity"]),
+                    "count": entry["count"], "expected": int(entry["expected"]), "position": position,
+                    "path": f"{path}.by_severity[{position}]",
+                })
+
+
+def add_d10(conn: sqlite3.Connection, records: Sequence[Record], values: dict) -> None:
+    """d10_evidence_count: one row per run; d10_by_checkpoint: one per checkpoint.
+
+    A checkpoint's path_record is its first entry in the run, as in D1, and
+    its checkpoint_name and zone are copied from there.
+    """
+    # run_id -> (its index in records, checkpoint_id -> its first index in the run)
+    where = {}
+    for i, record in enumerate(records):
+        first = {}
+        for j, checkpoint in enumerate(record.checkpoints):
+            first.setdefault(checkpoint.checkpoint_id, j)
+        where[record.run_id] = (i, first)
+    for instance, outputs in instances(values, "evidence_count"):
+        for k, out in enumerate(outputs):
+            path = f"derived.values.{instance}[{k}]"
+            insert(conn, "d10_evidence_count", {"instance": instance, "path": path, **stored(out, "by_checkpoint")})
+            i, positions = where[out["run_id"]]
+            for position, entry in enumerate(out.get("by_checkpoint", [])):
+                j = positions[entry["checkpoint_id"]]
+                checkpoint = records[i].checkpoints[j]
+                insert(conn, "d10_by_checkpoint", {
+                    "instance": instance, "run_id": out["run_id"], "position": position,
+                    "checkpoint_name": checkpoint.checkpoint_name, "zone": checkpoint.zone,
+                    "path": f"{path}.by_checkpoint[{position}]", "path_record": f"records[{i}].checkpoints[{j}]",
+                    **entry,
+                })
+
+
+def add_d11(conn: sqlite3.Connection, records: Sequence[Record], values: dict) -> None:
+    """d11_count_check: one row per run; d11_counts: one per declared count;
+    d11_evidence: one per event checked.
+
+    An event's checkpoint_id and checkpoint_name are copied from the event
+    itself, at path_record; path_visit is the visit it was matched to.
+    """
+    index = {record.run_id: i for i, record in enumerate(records)}
+    for instance, outputs in instances(values, "count_check"):
+        for k, out in enumerate(outputs):
+            path = f"derived.values.{instance}[{k}]"
+            insert(conn, "d11_count_check", {"instance": instance, "path": path, **stored(out, "counts", "evidence")})
+            for position, entry in enumerate(out.get("counts", [])):
+                insert(conn, "d11_counts", {
+                    "instance": instance, "run_id": out["run_id"], "position": position,
+                    "path": f"{path}.counts[{position}]", **entry,
+                    "matches": None if entry["matches"] is None else int(entry["matches"]),
+                })
+            i = index[out["run_id"]]
+            for position, entry in enumerate(out.get("evidence", [])):
+                event = records[i].event_log[entry["event"]]
+                insert(conn, "d11_evidence", {
+                    "instance": instance, "run_id": out["run_id"], "position": position,
+                    "checkpoint_id": event.checkpoint_id, "checkpoint_name": event.checkpoint_name,
+                    "path": f"{path}.evidence[{position}]", "path_record": f"records[{i}].event_log[{entry['event']}]",
+                    "path_visit": None if entry["visit"] is None else f"records[{i}].checkpoints[{entry['visit']}]",
+                    **entry, "matches": int(entry["matches"]),
+                })
+
+
 RECORD_LISTS = {
     "rec_checkpoints": ("checkpoints", (
         "checkpoint_id", "checkpoint_name", "zone", "status", "result_status", "sequence_number", "timestamp",

@@ -123,11 +123,12 @@ def classify_token(token: str, context: str) -> TokenClass:
 
 # Keys of a derived value that hold a count (section 6.2: "a count, n,
 # population or n_returned field"), plus the other whole-number tallies the
-# eight derivations produce. Keys starting count_ (D7) are counts too.
+# eleven derivations produce. Keys starting count_ (D7) are counts too.
 COUNT_KEYS = {
     "count", "n", "population", "n_returned", "n_requested", "numerator",
     "denominator", "run_count", "span_days", "inputs_used", "inputs_excluded",
     "inputs_stale", "runs_without_start", "day_count", "days_without_run",
+    "thermal_count", "rgb_count", "resolved_count", "unresolved_count", "declared", "counted", "mismatch_count",
 }
 
 

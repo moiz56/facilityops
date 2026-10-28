@@ -10,6 +10,7 @@ is never logged or put in an error message.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import time
@@ -98,8 +99,10 @@ def post(name: str, url: str, body: dict, headers: dict, config: ProviderConfig)
             if error.code not in RETRY_STATUSES:
                 raise ProviderError(f"{name} returned HTTP {error.code}: {error_message(error)}") from error
             last = f"HTTP {error.code}"
-        except (urllib.error.URLError, TimeoutError) as error:
-            last = str(getattr(error, "reason", error))
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as error:
+            # ConnectionError and HTTPException: the server dropped the connection
+            # mid-reply (e.g. RemoteDisconnected), which is worth another try.
+            last = str(getattr(error, "reason", error)) or type(error).__name__
         except json.JSONDecodeError as error:
             raise ProviderError(f"{name} returned a reply that is not JSON") from error
         if attempt < attempts:

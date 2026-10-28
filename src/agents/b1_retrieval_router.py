@@ -6,7 +6,9 @@ answering it:
               derivation database
   lookup      values exactly as recorded, for named runs, zones or
               checkpoints: goes to the lookup database
-  abstain     neither can answer it
+  catalogue   what can be asked at all ("help", "what can I ask"): answered
+              by code from the intent catalogue (b1_catalogue)
+  abstain     none of these can answer it
 Which runs, zones and checkpoints the question means is left to the step after.
 
 The reply is held to REPLY_SCHEMA by the provider and checked again by
@@ -27,7 +29,7 @@ from agents.utils import SENSOR_BLOCKS, fill_prompt
 
 log = logging.getLogger(__name__)
 
-RETRIEVALS = ("derivation", "lookup", "abstain")
+RETRIEVALS = ("derivation", "lookup", "catalogue", "abstain")
 
 REPLY_SCHEMA = {
     "type": "object",
@@ -60,16 +62,16 @@ each checkpoint the robot records:
 - if it missed the checkpoint, why (its missed reason); what was observed
   there, and any operator notes
 Each run also records:
-- findings: what was found, at which checkpoint, how severe, their status
-  (logged, needs review, abstained) and the recommended action recorded
-  with each
+- findings: what was found, its feature (the kind or type of finding), at
+  which checkpoint and zone, how severe, their status (logged, needs review,
+  abstained), a description, and the recommended action recorded with each
 - sensor alerts logged during the run, and the run's event log
 - the run's own details: facility, run status, final result, start and end
   time, duration
 A reading from a faulty or offline sensor, or from a checkpoint the robot
 missed, is left out, and the reason it was left out is kept.
 
-THE THREE KINDS
+THE FOUR KINDS
 derivation: a figure worked out over the runs, or a detail the runs recorded
 that lookup does not hold. These are held:
 {derivations}
@@ -100,7 +102,13 @@ checkpoints, with nothing combined or worked out:
   Choose lookup when the question asks for recorded values of the items it
   names, even when a derivation happens to carry that value too.
 
-abstain: neither can answer it:
+catalogue: the question asks what can be asked, not about the records
+themselves: "what questions can I ask", "help", "what can you tell me",
+"what do you know about these runs", "what kind of questions work here".
+  A question that names a checkpoint, zone or run and asks what happened
+  there is about the records: derivation or lookup, not catalogue.
+
+abstain: none of the above can answer it:
   - why something happened, what will happen, or advice of your own on what
     should be done (a recommended action the records hold is a recorded
     detail: derivation)
@@ -117,6 +125,22 @@ RULES
   limit" are derivation.
 - A question that asks for a figure and a recorded value together is
   derivation.
+- A question that asks which images there are is lookup, however it is
+  worded: images, photos, pictures, thermal or annotated images, what was
+  captured, for one checkpoint, a zone, every checkpoint or several runs.
+- A question that counts images is derivation: how many images, how many
+  thermal or RGB, how many work or are broken, which checkpoint has the most
+  or fewest, and which checkpoints captured no images or none of one kind.
+  "Which images were taken at <checkpoint>" is lookup; "how many images were
+  taken at <checkpoint>" and "which checkpoints have no evidence" are
+  derivation.
+- Any question about findings is derivation, however it is worded: "tell me
+  about the findings", "findings by category", "what types of findings",
+  "group the findings by kind", "a breakdown of the findings". Category,
+  type, kind or group may mean the finding's feature, severity or status; the
+  next step works out which, and says so if none fits. Never abstain on a
+  findings question at this step, unless it asks why, what will happen,
+  advice or a judgement (see abstain).
 - <checkpoint> and <zone> above stand for any checkpoint or zone name.
 - Names of runs, dates, zones and checkpoints do not decide the kind. Whether
   they exist is checked in the next step: never abstain because a name is
@@ -124,7 +148,7 @@ RULES
 
 REPLY
 JSON only:
-  {"retrieval": "derivation" | "lookup" | "abstain", "reason": "<one short sentence>"}
+  {"retrieval": "derivation" | "lookup" | "catalogue" | "abstain", "reason": "<one short sentence>"}
 
 {feedback}QUESTION
 {question}
@@ -139,7 +163,7 @@ class RetrievalError(ValueError):
 class Retrieval:
     """Which retrieval answers the question.
 
-    kind:     derivation, lookup or abstain
+    kind:     derivation, lookup, catalogue or abstain
     reason:   the model's one sentence on why
     attempts: model calls made
     """
@@ -200,7 +224,7 @@ def parse_reply(reply: str, attempt: int) -> Retrieval:
     if not isinstance(plan, dict) or set(plan) != {"retrieval", "reason"}:
         raise RetrievalError("the reply is one JSON object with exactly the keys retrieval and reason")
     if plan["retrieval"] not in RETRIEVALS:
-        raise RetrievalError('retrieval must be "derivation", "lookup" or "abstain"')
+        raise RetrievalError('retrieval must be "derivation", "lookup", "catalogue" or "abstain"')
     if not isinstance(plan["reason"], str) or not plan["reason"].strip():
         raise RetrievalError("reason must be one short sentence")
     return Retrieval(plan["retrieval"], plan["reason"].strip(), attempt)

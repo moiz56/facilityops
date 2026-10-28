@@ -399,6 +399,24 @@ An excluded reading's row cites where its field sits
 (records[i].checkpoints[j].sensor.<block>.<field>), so its field and block
 names trace as keys; its value there is never shown.
 
+## An excluded reading with nothing in the record is shown without its field (b1_analytical)
+
+A field or block name traces as a key by the path's text alone, so it assumes
+the record holds something there. A checkpoint never reached breaks that: a
+run stopped partway leaves its later checkpoints IN_PROGRESS or PENDING with
+sensor null. "Temperature at all checkpoints in the latest run" then failed
+whole (REFUSED_UNVERIFIABLE), because one key slot had nothing to cite.
+
+So build_lines leaves a key out of a row when the record holds nothing at its
+path and the row has a reason. The row still shows its cited checkpoint id
+and its uncited reason ("checkpoint status is IN_PROGRESS"), so every
+checkpoint asked about is listed and the unread ones say why.
+
+Only then. A key with nothing behind it on a row with no reason still fails,
+so a wrong path cannot drop a name quietly. Values, ids and timestamps are
+traced by matching a stored value and are never left out. With several fields
+asked, an unread checkpoint repeats its line once per field; not merged yet.
+
 ## D2 counts by value (derivation.py, derivations.yaml)
 
 Brief Q7 ("how many findings were recorded on the most recent run, by
@@ -416,3 +434,20 @@ as before. The derivation database gains d2_by_value (one row per value) and
 a `field` column on d2_condition_count. Beyond the brief's output shape;
 asked for directly. The finding-status instance is
 `condition_count_finding_status` in config/derivations.yaml (B-1 only).
+
+## D9 sensor_alert_count (derivation.py, derivations.yaml)
+
+A ninth derivation type. The brief closes the set at eight; asked for
+directly. It gives, for each run: `count` (how many sensor alerts the run
+logged), `by_severity` ({severity, count, expected} per severity: the
+expected ones first, each at 0 when absent, then any other severity found,
+verbatim). Derived values only: the alerts themselves are not copied in,
+they stay in the records.
+
+It reads the run's sensor_alerts directly, not eligibility: alerts have no
+device flag or checkpoint status to judge them by. A run with no alerts is a
+count of 0, status OK: the run recorded none. It runs per run like D1-D6, so
+its value is a list carrying run_id. The derivation database gains
+d9_sensor_alert_count (one row per run) and d9_by_severity (one row per
+severity); the router offers it, and routes/sensor_alert_count.py is its SQL
+writer prompt.

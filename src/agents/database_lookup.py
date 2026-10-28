@@ -3,7 +3,9 @@
 Built from eligibility_by_run, the view --eligibility-json writes, so a
 reading here is one eligibility kept, and one it left out is here with its
 reason instead of a value. Samples are left out: lookups are about the
-checkpoints. Nothing is computed. Each row that holds a record value carries
+checkpoints. Nothing is computed, except two flags on each evidence row:
+is_thermal, from the file name, and resolves, whether the file is a readable
+image under evidence_root (common.paths). Each row that holds a record value carries
 `path`, where it sits in the extended record, in the form fill_slots takes.
 Kept apart from the derivation database: a query on one never reads the other.
 """
@@ -15,6 +17,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+from common.paths import parse_filename, resolve_evidence
 from agents.database_derivation import insert, open_saved
 from agents.schema import DerivationConfig
 from agents.utils import SENSOR_BLOCKS, format_timestamp
@@ -94,6 +97,9 @@ CREATE TABLE evidence (
     kind            TEXT NOT NULL,           -- evidence_image, annotated_image or finding_image
     finding_id      TEXT,                    -- the finding the image belongs to; finding_image only
     image_path      TEXT NOT NULL,           -- as recorded, e.g. /run-files/<run>/evidence/<route>/<checkpoint>/<file>.jpg
+    is_thermal      INTEGER NOT NULL,        -- 1: the file name carries the thermal marker; 0: RGB
+    resolves        INTEGER,                 -- 1: a readable image file; 0: missing, empty or unreadable;
+                                             -- NULL when the files were not checked
     position        INTEGER NOT NULL,        -- order within the checkpoint and kind, 0 = first
     path            TEXT NOT NULL,           -- the image: records[i].checkpoints[j].evidence_images[k], ...
     FOREIGN KEY (run_id, checkpoint_id) REFERENCES checkpoints
@@ -117,11 +123,17 @@ EVIDENCE_KINDS = {
 CHECKPOINT_FIELDS = ("status", "result_status")
 
 
-def build_lookup_database(view: dict, config: DerivationConfig) -> sqlite3.Connection:
-    """view is eligibility_by_run's output. config gives the timestamp format."""
+def build_lookup_database(
+    view: dict, config: DerivationConfig, resolved: dict[str, bool] | None = None,
+) -> sqlite3.Connection:
+    """view is eligibility_by_run's output. config gives the timestamp format
+    and evidence_root. resolved is resolved_images(view, config), worked out
+    here when not given."""
     runs = view["runs"]
     if not runs:
         raise ValueError("no runs to build the lookup database from")
+    if resolved is None:
+        resolved = resolved_images(view, config)
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
@@ -134,7 +146,7 @@ def build_lookup_database(view: dict, config: DerivationConfig) -> sqlite3.Conne
             for cid, cp in zone_entry["checkpoints"].items():
                 add_checkpoint(conn, run_id, zone, cid, cp)
                 add_readings(conn, run_id, zone, cid, cp, config)
-                add_evidence(conn, run_id, zone, cid, cp)
+                add_evidence(conn, run_id, zone, cid, cp, resolved)
     conn.commit()
     # Built once, then read-only.
     conn.execute("PRAGMA query_only = ON")
@@ -178,27 +190,55 @@ def add_readings(conn: sqlite3.Connection, run_id: str, zone: str, cid: str, cp:
                 })
 
 
-def add_evidence(conn: sqlite3.Connection, run_id: str, zone: str, cid: str, cp: dict) -> None:
+def add_evidence(conn: sqlite3.Connection, run_id: str, zone: str, cid: str, cp: dict, resolved: dict) -> None:
     """One evidence row per image path the checkpoint recorded."""
     for key, kind in EVIDENCE_KINDS.items():
         for position, item in enumerate(cp["evidence"][key]):
+            resolves = resolved.get(item["image"])
             insert(conn, "evidence", {
                 "run_id": run_id, "zone": zone, "checkpoint_id": cid, "kind": kind,
                 "finding_id": item.get("finding_id"), "image_path": item["image"],
+                "is_thermal": int(parse_filename(item["image"], cid)[1]),
+                "resolves": None if resolves is None else int(resolves),
                 "position": position, "path": item["path"],
             })
 
 
+def resolved_images(view: dict, config: DerivationConfig) -> dict[str, bool]:
+    """Each image path in view -> whether it is a readable file under
+    config.evidence_root (common.paths.resolve_evidence, the report's own
+    check, as D10 uses). Empty when there is no evidence_root."""
+    if config.evidence_root is None:
+        return {}
+    images = {
+        item["image"]
+        for run in view["runs"].values()
+        for zone in run["zones"].values()
+        for cp in zone["checkpoints"].values()
+        for key in EVIDENCE_KINDS
+        for item in cp["evidence"][key]
+    }
+    return {image: resolve_evidence(image, config.evidence_root).readable for image in sorted(images)}
+
+
 def open_lookup_database(view: dict, config: DerivationConfig, path: Path) -> tuple[sqlite3.Connection, bool]:
-    """The lookup database for view, in memory, and whether its saved copy was reused (see open_saved)."""
-    return open_saved(path, lookup_fingerprint(view, config), lambda: build_lookup_database(view, config))
+    """The lookup database for view, in memory, and whether its saved copy was reused (see open_saved).
+
+    The images are resolved first, so a file that appears or goes missing
+    changes the fingerprint and the database is built again.
+    """
+    resolved = resolved_images(view, config)
+    return open_saved(
+        path, lookup_fingerprint(view, config, resolved), lambda: build_lookup_database(view, config, resolved),
+    )
 
 
-def lookup_fingerprint(view: dict, config: DerivationConfig) -> str:
-    """sha256 of everything the lookup database is built from: the view, the
-    configs (their hash) and this module's code."""
+def lookup_fingerprint(view: dict, config: DerivationConfig, resolved: dict[str, bool]) -> str:
+    """sha256 of everything the lookup database is built from: the view, which
+    images resolve, the configs (their hash) and this module's code."""
     text = json.dumps({
         "view": view,
+        "resolved": resolved,
         "config_hash": config.config_hash,
         "code": Path(__file__).read_text(encoding="utf-8"),
     }, default=str)

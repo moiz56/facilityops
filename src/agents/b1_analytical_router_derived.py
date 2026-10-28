@@ -173,6 +173,33 @@ itself.
   third run start" is [3], "which runs were taken on 21/8/2026" is
   ["2026-08-21"]. It covers only the runs loaded here, not when anything
   began: the age or lifetime of the route, site or equipment is not in it.
+- An alert count holds, for each run, how many sensor alerts were logged, and
+  how many of each severity. Use it for "how many alerts", "how many critical
+  alerts", "alerts by severity" or "which run had the most alerts". It holds
+  no single alert: which alerts, what they said, when, and their nearest
+  checkpoint or zone are in the records. It holds no count per checkpoint or
+  zone. A "warning" alert is an alert's severity, not a checkpoint's WARN
+  result.
+- An evidence count holds, for each run and for each checkpoint in it, how
+  many evidence images were captured, how many are thermal and how many RGB,
+  and how many resolve to a working file and how many do not. Every
+  checkpoint is listed, even one that captured none. Use it for "how many
+  images", "how many thermal images", "how many images are broken", "which
+  checkpoints captured no evidence" or "which checkpoint has the most
+  images". It counts only the photos taken at checkpoints, not annotated
+  images or the images of findings. It holds no single image: which images
+  were taken, and their files, are a lookup, not this. It holds no total per
+  zone, only each checkpoint's count; name the zone or checkpoints.
+- A count check compares, for each run, the counts the robot reported for
+  itself (required, completed, passed, failed, missed and warned
+  checkpoints, and findings) with the same counts taken from the run's own
+  lists, and each checkpoint event's evidence count with the images that
+  visit recorded. For each it holds both numbers and whether they match, and
+  for the run how many do not. Use it for "do the counts match", "are the
+  reported counts right", "which counts are wrong", "did it report the right
+  number of failed checkpoints", "which checkpoints have the wrong evidence
+  count" or "how many mismatches". Only what the robot reported, with no
+  check against the lists, is in the records.
 
 THE RECORDS THEMSELVES
 "records" is not a figure: it is what each run wrote down, as written. Name it
@@ -347,6 +374,19 @@ def describe(name: str, derivation: DerivationConfig) -> str:
         return (f"- {name}: date range. Across all runs: the earliest and latest start time and which runs "
                 f"they were, the days between them, how many runs, and how many days had a run and how many "
                 f"did not; each day a run was taken on, its weekday, and its runs; and when each run started")
+    if entry["type"] == "sensor_alert_count":
+        expected = ", ".join(entry.get("expected") or [])
+        return (f"- {name}: alert count. In each run, how many sensor alerts were logged, and how many of "
+                f"each severity ({expected}, each listed even at 0, and any other severity found)")
+    if entry["type"] == "count_check":
+        return (f"- {name}: count check. In each run: the counts the robot reported for itself (required, "
+                f"completed, passed, failed, missed and warned checkpoints, and findings) next to the same "
+                f"counts taken from the run's lists, and each checkpoint event's evidence count next to the "
+                f"images that visit recorded; whether each matches, and how many do not")
+    if entry["type"] == "evidence_count":
+        return (f"- {name}: evidence count. In each run and at each checkpoint (every checkpoint listed, even "
+                f"at 0): how many evidence images were captured, how many are thermal and how many RGB, and "
+                f"how many resolve to a working file and how many do not")
     if entry["type"] == "rank_top_n":
         return (f"- {name}: ranking. In each run, the {entry['n']} highest {entry['field_path']} readings "
                 f"over its {entry['source']}, highest first, and which reading each was")

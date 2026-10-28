@@ -4,12 +4,12 @@
 # and passes what it holds down as arguments.
 
 provider:
-  name: gemini                     # gemini or claude; the key is GEMINI_API_KEY or ANTHROPIC_API_KEY in .env
-  model: gemini-2.5-flash
+  # name: gemini                     # gemini or claude; the key is GEMINI_API_KEY or ANTHROPIC_API_KEY in .env
+  # model: gemini-2.5-flash
   # For Claude, use these two lines instead. The model must accept temperature:
   # claude-sonnet-4-6 and claude-haiku-4-5 do; Opus 5, Sonnet 5 and Opus 4.7+ return HTTP 400.
-  # name: claude
-  # model: claude-sonnet-4-6
+  name: claude
+  model: claude-sonnet-4-6
   temperature: 0.0                
   timeout_seconds: 60
   max_retries: 3                   # retries after a timeout, 429 or 5xx; other errors fail at once
@@ -22,6 +22,7 @@ agents:
     prompt_version: b1_answer_v2
     max_attempts: 3              # model calls per question, first try included
     max_question_chars: 500        # a longer question is refused, never cut short
+    pdf: false                     # true: --ask also writes the answer as a PDF to b1_answers
   b2_narrative:
     enabled: true
     prose: true                    # false: the summary keeps code's paragraph order, no model call

@@ -27,6 +27,7 @@ from pathlib import Path
 from agents.b1_analytical import answer_question
 from agents.b1_analytical_router_derived import RouteError, route_question
 from agents.b1_analytical_router_lookup import route_lookup
+from agents.b1_catalogue import check_catalogue
 from agents.b1_retrieval_router import RetrievalError, classify_question
 from agents.b1_answer_pdf import write_answer_pdf
 from agents.b2_narrative import run_coverage, run_item_notes, run_section_intros, run_summary
@@ -56,6 +57,7 @@ DERIVATIONS_CONFIG = PROJECT_ROOT / "config" / "derivations.yaml"
 B2_DERIVATIONS_CONFIG = PROJECT_ROOT / "config" / "b2_derivations.yaml"   # B-2's own set; B-1 never reads it
 ACTION_MAPPING_CONFIG = PROJECT_ROOT / "config" / "action_mapping.yaml"    # B-3's feature -> category mapping
 AGENTS_CONFIG = PROJECT_ROOT / "config" / "agents.yaml"
+CATALOGUE_CONFIG = PROJECT_ROOT / "config" / "intent_catalogue.yaml"   # what B-1 offers for "what can I ask"
 ENV_FILE = PROJECT_ROOT / ".env"   # API keys; see provider.make_provider
 
 
@@ -73,6 +75,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
                         help="derivation config (default: %(default)s)")
     parser.add_argument("--agents", type=Path, default=AGENTS_CONFIG,
                         help="agent config (default: %(default)s)")
+    parser.add_argument("--catalogue", type=Path, default=CATALOGUE_CONFIG,
+                        help="intent catalogue B-1 answers \"what can I ask\" from (default: %(default)s)")
     parser.add_argument("--output", type=Path, default=None,
                         help="where --all writes the extended record; overrides agent.extended_record")
 
@@ -134,9 +138,13 @@ def main(argv: list[str] | None = None) -> int:
         paths = load_config(args.paths)
         report = load_config(args.report)
         derivations = load_config(args.derivations)
-        config = derivation_config(report, derivations, hash_configs(report, derivations))
+        config = derivation_config(
+            report, derivations, hash_configs(report, derivations),
+            PROJECT_ROOT / setting(paths, "agent", "evidence_root"),
+        )
         agents = load_config(args.agents)
         verification = verification_config(agents, report, derivations)
+        catalogue = check_catalogue(load_config(args.catalogue))
     except ConfigError as error:
         return fail(str(error))
 
@@ -242,7 +250,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.ask:
             try:
-                result = answer_question(args.ask, extended, conn, provider, b1, config, verification, lookup_conn)
+                result = answer_question(
+                    args.ask, extended, conn, provider, b1, config, verification, lookup_conn, catalogue,
+                )
             except ValueError as error:
                 return fail(str(error))
             run_ids = (result.output or {}).get("records_consulted") or [r.run_id for r in extended.records]
@@ -257,15 +267,16 @@ def main(argv: list[str] | None = None) -> int:
             if result.trace:
                 print_b1_trace(result.trace)
             print_b1_answer(result, extended)
-            try:
-                pdf = write_answer_pdf(
-                    args.ask, result, answer_envelope, extended, config, report,
-                    PROJECT_ROOT / setting(paths, "agent", "b1_answers"),
-                    PROJECT_ROOT / setting(paths, "agent", "evidence_root"),
-                )
-            except (ConfigError, OSError) as error:
-                return fail(f"the answer PDF was not written: {error}")
-            print(f"\nanswer written to {pdf}")
+            if b1.pdf:
+                try:
+                    pdf = write_answer_pdf(
+                        args.ask, result, answer_envelope, extended, config, report,
+                        PROJECT_ROOT / setting(paths, "agent", "b1_answers"),
+                        PROJECT_ROOT / setting(paths, "agent", "evidence_root"),
+                    )
+                except (ConfigError, OSError) as error:
+                    return fail(f"the answer PDF was not written: {error}")
+                print(f"\nanswer written to {pdf}")
 
     return 0
 
