@@ -23,3 +23,10 @@ __pycache__/
 #ignore
 B1_LOOKUP_QUESTIONS.txt
 B1_QUESTIONS.txt
+B1_DERIVATIONS.txt
+B1_EXTENSION_QUESTIONS.txt
+B1_ROUTES.txt
+B1_SCHEMAS.txt
+
+#logs
+/logs
