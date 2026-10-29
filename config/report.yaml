@@ -52,6 +52,27 @@ evidence:
   thermal_suffix: _thermal       # filename marker for a thermal image
   rgb_suffix: _rgb               # filename marker for an RGB image; unmarked is RGB too
 
+could_not_read:                    # captured, but could not be read. Not a gap, not a finding
+  reasons:                         # reason code -> what it means and which finding statuses produce it
+    GLARE:
+      meaning: specular reflection prevented a reading
+      finding_status: []           # nothing produces this yet
+    BLUR:
+      meaning: focus below the readable threshold
+      finding_status: []           # nothing produces this yet
+    OBSTRUCTED:
+      meaning: the subject was physically blocked
+      finding_status: []           # nothing produces this yet
+    OUT_OF_FRAME:
+      meaning: the subject was not fully captured
+      finding_status: []           # nothing produces this yet
+    ILLEGIBLE:
+      meaning: captured clearly, could not be parsed
+      finding_status: []           # nothing produces this yet
+    DETECTOR_ABSTAINED:
+      meaning: a detector declined to call it
+      finding_status: [abstained]
+
 sections:
   cover: true
   coverage: true

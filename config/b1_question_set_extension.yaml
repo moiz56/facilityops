@@ -318,7 +318,7 @@ questions:
 
   # ══ COMPARISON ═══════════════════════════════════════════════════════════
 
-  - id: Q36
+  - id: Q36 (TO BE IMPLEMENTED)
     category: comparison
     question: "Which findings are new since the previous run?"
     must_abstain: false
@@ -334,7 +334,7 @@ questions:
       - "any new problems"
       - "newly flagged items"
 
-  - id: Q37
+  - id: Q37 (TO BE IMPLEMENTED)
     category: comparison
     question: "Which findings appear in both of the last two runs?"
     must_abstain: false
@@ -354,7 +354,7 @@ questions:
       later round is ABSENT, not resolved and not fixed — those are
       determinations the records do not support.
 
-  - id: Q38
+  - id: Q38 (TO BE IMPLEMENTED)
     category: comparison
     question: "How did coverage change between the last two runs?"
     must_abstain: false
@@ -373,7 +373,7 @@ questions:
       States the figures for both runs and the signed difference. **Does not
       characterise it** — no "better", "worse", "improved".
 
-  - id: Q39
+  - id: Q39 (TO BE IMPLEMENTED)
     category: comparison
     question: "Which sensor blocks were available last run but not this one?"
     must_abstain: false
@@ -407,7 +407,7 @@ questions:
       - "run outcome"
       - "summary of the latest inspection"
 
-  - id: Q41
+  - id: Q41 (this needs to be fixed)
     category: status
     question: "Which findings have no configured action?"
     must_abstain: false

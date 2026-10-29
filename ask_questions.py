@@ -1,70 +1,56 @@
-"""Answer every question in a question set and write each answer as a text file.
+"""Answer every question in a question set as one tenant, and write each answer as a text file.
 
-Each question is answered the way `python -m agents.main --ask` answers it,
-but instead of a PDF, output/b1_answers_txt/<id>.txt holds the question, the
-status and the answer. It calls the real model, so it needs the API key in .env.
+Each question goes through query.ask, the way `python -m query.main --ask`
+answers it: scoped to the tenant's records and written to its query log. But
+instead of a PDF, output/b1_answers_txt/<tenant>/<id>.txt holds the question,
+the status, the records in scope and the answer. It calls the real model, so
+it needs the API key in .env.
 
-    PYTHONPATH=src python ask_questions.py                                 # the extension set
-    PYTHONPATH=src python ask_questions.py config/b1_question_set.yaml     # another set
+    PYTHONPATH=src python ask_questions.py                                          # tenant_facility, the extension set
+    PYTHONPATH=src python ask_questions.py --tenant tenant_racks                    # another tenant
+    PYTHONPATH=src python ask_questions.py config/b1_question_set.yaml             # another set
 """
 
-import sys
+import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 
-from agents.b1_analytical import ABSTAIN, answer_question
-from agents.b1_catalogue import check_catalogue
-from agents.data_agent import load_corpus
-from agents.database_derivation import open_database
-from agents.database_lookup import open_lookup_database
-from agents.derivation import compute_eligibility, extend_record
-from agents.main import (
-    AGENT_PATH_CONFIG, AGENTS_CONFIG, CATALOGUE_CONFIG, DERIVATIONS_CONFIG, ENV_FILE, REPORT_CONFIG,
-)
-from agents.provider import make_provider
-from agents.utils import (
-    b1_config, derivation_config, eligibility_by_run, hash_configs, load_env, provider_config, verification_config,
-)
+from agents.b1_analytical import ABSTAIN
 from common import PROJECT_ROOT
-from common.paths import load_config, setting
+from common.paths import load_config
+from query.ask import ask, load_settings
+from query.scope import QueryContext
 
 QUESTION_SET = PROJECT_ROOT / "config" / "b1_question_set_extension.yaml"
 OUTPUT_DIR = PROJECT_ROOT / "output" / "b1_answers_txt"
 
-question_set = Path(sys.argv[1]) if len(sys.argv) > 1 else QUESTION_SET
+parser = argparse.ArgumentParser(description="Answer a question set as one tenant.")
+parser.add_argument("question_set", nargs="?", type=Path, default=QUESTION_SET, help="the question set")
+parser.add_argument("--tenant", default="tenant_facility", help="the tenant asking, as named in config/tenants.yaml")
+args = parser.parse_args()
 
-load_env(ENV_FILE)
-paths = load_config(AGENT_PATH_CONFIG)
-report = load_config(REPORT_CONFIG)
-derivations = load_config(DERIVATIONS_CONFIG)
-agents = load_config(AGENTS_CONFIG)
-config = derivation_config(report, derivations, hash_configs(report, derivations))
-verification = verification_config(agents, report, derivations)
-b1 = b1_config(agents)
-catalogue = check_catalogue(load_config(CATALOGUE_CONFIG))
+settings = load_settings(PROJECT_ROOT)
+output_dir = OUTPUT_DIR / args.tenant
+output_dir.mkdir(parents=True, exist_ok=True)
 
-records = load_corpus(PROJECT_ROOT / setting(paths, "agent", "data_dir"), setting(paths, "agent", "record_patterns"))
-eligibility = compute_eligibility(records, config)
-extended = extend_record(records, config, eligibility)
-conn, _ = open_database(extended, config, PROJECT_ROOT / setting(paths, "agent", "database"))
-lookup_conn, _ = open_lookup_database(
-    eligibility_by_run(records, eligibility, config), config, PROJECT_ROOT / setting(paths, "agent", "lookup_database"),
-)
-provider = make_provider(provider_config(agents))
-
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-for q in load_config(question_set)["questions"]:
-    result = answer_question(
-        q["question"], extended, conn, provider, b1, config, verification, lookup_conn, catalogue,
+for q in load_config(args.question_set)["questions"]:
+    context = QueryContext(
+        tenant_id=args.tenant,
+        facility_ids=(),
+        run_window=None,
+        asked_by="ask_questions",
+        asked_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     )
-    answer = (result.output or {}).get("answer") or "(no answer shown)"
-    status = "ABSTAINED" if answer == ABSTAIN else result.status
+    answer_envelope = ask(q["question"], context, settings)
+    output = answer_envelope["output"] or {}
+    answer = output.get("answer") or "(no answer shown)"
+    status = "ABSTAINED" if answer == ABSTAIN else answer_envelope["status"]
 
-    lines = [f"{q['id']}  {q['question']}", "", f"status: {status}"]
-    if result.reason:
-        lines.append(f"reason: {result.reason}")
-    lines += ["", answer]
-    (OUTPUT_DIR / f"{q['id']}.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    lines = [
+        f"{q['id']}  {q['question']}", "",
+        f"status: {status}",
+        f"records in scope: {output.get('records_in_scope')}", "",
+        answer,
+    ]
+    (output_dir / f"{q['id']}.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"{q['id']}  {status}")
-
-conn.close()
-lookup_conn.close()

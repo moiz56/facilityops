@@ -411,7 +411,8 @@ def build_lines(
 
     Each run's id is a heading line, "Run {{ slot }}", written when the run
     changes; under it one line per row, "- column {{ slot }}, ...". Rows with
-    no run_id (D7, D8) are the lines alone.
+    no run_id (D7, D8) are the lines alone. Values every row takes from the
+    same place (shared_columns) are one line above the first row instead.
 
     Returns (lines, slots, values, notes, summary): slots maps each slot to
     its path in the extended record (only when FILL_AND_VERIFY is on), values
@@ -449,6 +450,9 @@ def build_lines(
 
     slots, values, notes = {}, {}, []
     text_columns = getattr(module, "TEXT_COLUMNS", ())
+    # How a column is named in the answer; any other is its name with spaces.
+    labels = getattr(module, "LABELS", {})
+    shared = shared_columns(columns, rows, shown, text_columns, extended, derivation)
     run = None
     for r, row in enumerate(rows):
         cells = dict(zip(columns, row))
@@ -458,15 +462,17 @@ def build_lines(
         if route.checkpoints and cells.get("checkpoint_id") not in (None, *route.checkpoints):
             raise PlanError(f"the query returned {cells['checkpoint_id']}, which is not in the list; filter checkpoint_id")
         bases = [cells[c] for c in columns if is_path(c) and cells[c]]
-        parts = []
+        head, parts = [], []
         for c in shown:
             if cells[c] is None or cells[c] == "":
                 continue   # e.g. reason on an OK run, delta on a NOT_COMPUTABLE checkpoint
+            if c in shared and r > 0:
+                continue   # shown once, above the first row
             if c == "run_id" and cells[c] == run:
                 continue   # a run's id heads its rows once
             if c in text_columns:
                 notes.append(str(cells[c]))
-                parts.append(f"{c.replace('_', ' ')} {cells[c]}")
+                parts.append(f"{labels.get(c, c.replace('_', ' '))} {cells[c]}")
                 continue
             slot_id = f"q{n}_r{r}_{c}"
             if FILL_AND_VERIFY:
@@ -492,10 +498,41 @@ def build_lines(
                 continue
             # "exceeds count", not exceeds_count: the verifier would take a
             # name with an underscore for an id to check against the records.
-            parts.append(f"{c.replace('_', ' ')} {{{{ {slot_id} }}}}")
+            (head if c in shared else parts).append(f"{labels.get(c, c.replace('_', ' '))} {{{{ {slot_id} }}}}")
+        if head:
+            lines.append(", ".join(head))
         if parts:
             lines.append("- " + ", ".join(parts))
     return lines, slots, values, notes, summary
+
+
+def shared_columns(
+    columns: list[str], rows: list[tuple], shown: list[str], text_columns: tuple,
+    extended: ExtendedRecord, derivation: DerivationConfig,
+) -> set[str]:
+    """The columns every row takes from the same place in the record.
+
+    e.g. D7's two runs and count, repeated beside each finding by the join.
+    They are shown once, above the rows, instead of on every row. Only when
+    values are traced, and only with more than one row.
+    """
+    if not FILL_AND_VERIFY or len(rows) < 2:
+        return set()
+    shared = set()
+    for c in shown:
+        if c == "run_id" or c in text_columns:
+            continue   # a run's id already heads its rows; text has no place to compare
+        paths = set()
+        for row in rows:
+            cells = dict(zip(columns, row))
+            bases = [cells[p] for p in columns if is_path(p) and cells[p]]
+            try:
+                paths.add(trace(cells[c], c, bases, extended, derivation))
+            except ValueError:
+                paths.add(None)   # e.g. empty on this row; the row loop reports a real error
+        if len(paths) == 1 and None not in paths:
+            shared.add(c)
+    return shared
 
 
 # Columns a query may select only to sort by, e.g. a UNION ALL's ORDER BY,

@@ -33,6 +33,7 @@ from weasyprint import CSS, HTML
 from common import OUTPUT_DIR, PROJECT_ROOT
 from common.paths import ConfigError, ResolvedImage, decimals, setting, units
 from common.provenance import Provenance, stamp
+from common.readability import CouldNotRead
 from common.schema import (
     Checkpoint, Finding, Point2D, Pose, Record, SensorAlert, SensorBlock, SensorWarning,
 )
@@ -93,6 +94,7 @@ RENDERED_BLOCKS = (
     (None, "contents", "Contents"),
     ("coverage", "coverage", "Coverage and reconciliation"),
     ("coverage", "gaps", "All gaps"),
+    ("coverage", "could-not-read", "Could not read"),
     ("findings", "findings", "Findings"),
     ("alerts", "alerts", "Sensor alerts"),
     ("zone_telemetry", "zone-telemetry", "Zone telemetry"),
@@ -1658,6 +1660,7 @@ def render_html(
     item_notes: Sequence[str | None] | None = None,
     coverage_statement: str | None = None,
     action_plan: dict | None = None,
+    could_not_read: Sequence[CouldNotRead] = (),
 ) -> str:
     """Render the whole report to HTML.
 
@@ -1676,7 +1679,8 @@ def render_html(
     `coverage_statement` is B-2's coverage statement, printed below the
     executive summary on its page; None leaves it out. `action_plan` is B-3's
     output body (actions, unmapped), its own section after the executive
-    summary page, as tables; None leaves it out.
+    summary page, as tables; None leaves it out. `could_not_read` is the same
+    list the manifest carries, printed as its own section after the gap list.
     """
     rows = count_rows(derived, disagreeing_counts(record))
     evidence = evidence_rows(record, gaps)
@@ -1723,6 +1727,7 @@ def render_html(
         # correspondence can be checked by eye (decision 151).
         gap_rows=gap_rows(record, gaps),
         run_level=RUN_LEVEL,
+        could_not_read=list(could_not_read),
         missed=coverage_items(record, gaps, GapType.MISSED_CHECKPOINT),
         no_evidence=coverage_items(record, gaps, GapType.NO_EVIDENCE),
         verdict_style=verdict_style(record.final_status),
@@ -1794,6 +1799,7 @@ def render_document(
     item_notes: Sequence[str | None] | None = None,
     coverage_statement: str | None = None,
     action_plan: dict | None = None,
+    could_not_read: Sequence[CouldNotRead] = (),
 ) -> tuple[Path, PageMap]:
     """Render one run to a PDF, and report where each section landed in it.
 
@@ -1829,7 +1835,7 @@ def render_document(
         for attempt in range(3):
             html = render_html(
                 record, gaps, derived, grids, config, Path(image_dir), rows, executive_summary,
-                section_intros, item_notes, coverage_statement, action_plan,
+                section_intros, item_notes, coverage_statement, action_plan, could_not_read,
             )
             document = HTML(string=html, base_url=str(TEMPLATE_DIR)).render(
                 stylesheets=stylesheets,

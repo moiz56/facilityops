@@ -1,0 +1,51 @@
+{# Could not read: things captured but not read.
+
+   The same list the manifest carries in its `could_not_read` array, in the
+   same order. Kept apart from the gap list: a gap means the evidence is
+   absent, this means it is present and could not be read. #}
+<section class="section could-not-read" id="could-not-read">
+
+  <h2>Could not read</h2>
+
+  {% if could_not_read %}
+    <p class="lede">
+      Things the robot reached and captured but could not read. The evidence
+      exists, so these are not gaps, and nothing was called, so they are not
+      findings.
+    </p>
+
+    <p class="gap-count">
+      {{ could_not_read | length }} item{{ "" if could_not_read | length == 1 else "s" }} recorded.
+    </p>
+
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Reason</th>
+          <th>Item</th>
+          <th>Subject</th>
+          <th>Detail</th>
+          <th>Capture</th>
+          <th>Attempted</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in could_not_read %}
+          <tr>
+            <td>{{ entry.reason }}</td>
+            <td>{{ entry.item_id | show }}</td>
+            <td>{{ entry.subject | show }}</td>
+            <td>{{ entry.detail }}</td>
+            <td>{{ entry.capture_id | show }}</td>
+            <td>{{ entry.attempted_at | show }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="absent-note">
+      Nothing on this run was recorded as captured but unreadable.
+    </p>
+  {% endif %}
+
+</section>

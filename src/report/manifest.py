@@ -22,6 +22,7 @@ from pathlib import Path
 
 from common.paths import CONFIG_PATH, ResolvedImage, load_config, setting
 from common.provenance import Provenance, stamp
+from common.readability import CouldNotRead
 from common.schema import Record
 from report.derive import alert_counts, computed_counts, declared_counts
 from report.gaps import RUN_LEVEL, Gap
@@ -56,6 +57,7 @@ def build_manifest(
     provenance: Provenance | None = None,
     pages: PageMap | None = None,
     config: dict | None = None,
+    could_not_read: list[CouldNotRead] | None = None,
 ) -> dict:
     """Build the manifest for one run.
 
@@ -73,6 +75,9 @@ def build_manifest(
     pipeline has: it loads the file once and renders with it, and passing it
     here is what stops the same file being parsed a second time to hash it.
     A caller that only wants a manifest still passes a path and nothing else.
+
+    `could_not_read` is the list the report printed. The pipeline builds it
+    once and passes it to both, so the two hold the same entries.
     """
     found = [image for images_of in images.values() for image in images_of]
 
@@ -103,6 +108,7 @@ def build_manifest(
         "images_referenced": len(found),
         "images_rendered": sum(1 for image in found if image.readable),
         "gaps": [asdict(gap) for gap in gaps],
+        "could_not_read": [asdict(entry) for entry in could_not_read or []],
         "counts": {
             "declared": asdict(declared_counts(record)),
             "computed": asdict(computed_counts(record)),

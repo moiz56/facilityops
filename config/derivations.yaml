@@ -145,7 +145,10 @@ derivations:
     field_path: particulate.pm2_5
     source: checkpoints
     n: 5
-  # D7: checkpoints only in the previous run, only in the latest, and in both.
+  # D7: checkpoints, findings and sensor blocks only in the previous run, only
+  # in the latest, and in both. Findings match by their id without the run's
+  # prefix. A block is in a run where its reading passes the exclusion rule,
+  # at the checkpoints on both routes.
   run_set_difference:
     type: run_set_difference
   # D8: earliest and latest run start times across all runs, and the days between.

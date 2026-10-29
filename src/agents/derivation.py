@@ -467,10 +467,15 @@ def rank_top_n(
 def run_set_difference(
     records: Sequence[Record], params: dict, eligibility: Eligibility, config: DerivationConfig,
 ) -> dict:
-    """Which checkpoints are in one of the two latest runs and not the other.
+    """Which checkpoints, findings and sensor blocks are in one of the two latest
+    runs and not the other.
 
-    run_a is the earlier run, run_b the latest. Lists keep route order.
-    States what differs only: no trend or direction.
+    run_a is the earlier run, run_b the latest. Checkpoint lists keep route
+    order; finding lists keep their run's findings order and hold the ids as
+    recorded, run_b's for a finding in both. Block lists are keyed by block,
+    each with the checkpoints where it was available, of those on both routes,
+    in route order, and counted per block. States what differs only: no trend or direction, so a
+    finding only in run_a is absent, not resolved.
     """
     if len(records) < 2:
         return not_computable("run_set_difference", "requires two runs; one supplied")
@@ -483,6 +488,18 @@ def run_set_difference(
     only_in_b = [cid for cid in ids_b if cid not in ids_a]
     in_both = [cid for cid in ids_b if cid in ids_a]
 
+    keys_a = {finding_key(run_a, f.finding_id) for f in run_a.findings}
+    keys_b = {finding_key(run_b, f.finding_id) for f in run_b.findings}
+    findings_only_in_a = [f.finding_id for f in run_a.findings if finding_key(run_a, f.finding_id) not in keys_b]
+    findings_only_in_b = [f.finding_id for f in run_b.findings if finding_key(run_b, f.finding_id) not in keys_a]
+    findings_in_both = [f.finding_id for f in run_b.findings if finding_key(run_b, f.finding_id) in keys_a]
+
+    blocks_a = available_blocks(run_a, in_both, config)
+    blocks_b = available_blocks(run_b, in_both, config)
+    blocks_only_in_a = {block: [cid for cid in cids if cid not in blocks_b[block]] for block, cids in blocks_a.items()}
+    blocks_only_in_b = {block: [cid for cid in cids if cid not in blocks_a[block]] for block, cids in blocks_b.items()}
+    blocks_in_both = {block: [cid for cid in cids if cid in blocks_a[block]] for block, cids in blocks_b.items()}
+
     return {
         "derivation": "run_set_difference",
         "status": "OK",
@@ -494,6 +511,38 @@ def run_set_difference(
         "count_only_in_a": len(only_in_a),
         "count_only_in_b": len(only_in_b),
         "count_in_both": len(in_both),
+        "findings_only_in_a": findings_only_in_a,
+        "findings_only_in_b": findings_only_in_b,
+        "findings_in_both": findings_in_both,
+        "count_findings_only_in_a": len(findings_only_in_a),
+        "count_findings_only_in_b": len(findings_only_in_b),
+        "count_findings_in_both": len(findings_in_both),
+        "blocks_only_in_a": blocks_only_in_a,
+        "blocks_only_in_b": blocks_only_in_b,
+        "blocks_in_both": blocks_in_both,
+        "count_blocks_only_in_a": {block: len(cids) for block, cids in blocks_only_in_a.items()},
+        "count_blocks_only_in_b": {block: len(cids) for block, cids in blocks_only_in_b.items()},
+        "count_blocks_in_both": {block: len(cids) for block, cids in blocks_in_both.items()},
+    }
+
+
+def finding_key(record: Record, finding_id: str) -> str:
+    """A finding's id without its run's prefix, the same in every run:
+    <run_id>:<checkpoint_id>:<feature> -> <checkpoint_id>:<feature>."""
+    return finding_id.removeprefix(f"{record.run_id}:")
+
+
+def available_blocks(record: Record, checkpoints: list[str], config: DerivationConfig) -> dict[str, list[str]]:
+    """Each sensor block's checkpoints, of those given, where its reading passes
+    the exclusion rule: the checkpoint was completed, its sensor reading is ok,
+    connected and reachable, and the block's own device flag is true. A
+    checkpoint id recorded twice is judged by its first entry."""
+    by_id = {}
+    for checkpoint in record.checkpoints:
+        by_id.setdefault(checkpoint.checkpoint_id, checkpoint)
+    return {
+        block: [cid for cid in checkpoints if checkpoint_problem(by_id[cid], flag, config) is None]
+        for flag, block in config.subsystem_flags.items()
     }
 
 

@@ -33,6 +33,7 @@ from common.paths import (
     CONFIG_PATH, ConfigError, ResolvedImage, load_config, resolve_record_images,
 )
 from common.provenance import stamp
+from common.readability import CouldNotRead, could_not_read
 from common.schema import Record
 from report.derive import DerivedValues, derive_report_values
 from report.gaps import RUN_LEVEL, Gap, detect_gaps
@@ -59,6 +60,7 @@ class Artifacts:
     images: dict[str, list[ResolvedImage]]
     grids: dict[str, list[ViewCell]]
     gaps: list[Gap]
+    could_not_read: list[CouldNotRead]
     derived: DerivedValues
     pdf_path: Path
     manifest: dict
@@ -98,6 +100,10 @@ def run_pipeline(
     config = load_config(config_path)
     provenance = stamp(record.run_id, config)
 
+    # could_not_read. Built once and passed to both render and manifest, the
+    # same way gaps are, so the PDF and the manifest hold the same entries.
+    unreadable = could_not_read(record, config)
+
     # executive summary, only when config asks for it: B-2 writes it from this
     # run alone, and render puts it straight after the cover.
     summary = executive_summary(record, config) if config["sections"].get("executive_summary") else None
@@ -111,17 +117,17 @@ def run_pipeline(
     # can know them (4.4).
     pdf_path, pages = render_document(
         record, gaps, derived, grids, config, output_dir, provenance, summary, intros, notes,
-        statement, actions,
+        statement, actions, unreadable,
     )
 
     # manifest. The same config path the render used, so the version stamp and
     # the config hash describe the config that was actually applied (4.4).
     manifest = build_manifest(
-        record, gaps, images, pdf_path, config_path, provenance, pages, config,
+        record, gaps, images, pdf_path, config_path, provenance, pages, config, unreadable,
     )
 
     return Artifacts(
-        record=record, images=images, grids=grids, gaps=gaps,
+        record=record, images=images, grids=grids, gaps=gaps, could_not_read=unreadable,
         derived=derived, pdf_path=pdf_path, manifest=manifest,
     )
 

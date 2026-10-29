@@ -436,8 +436,9 @@ CREATE TABLE d6_{instance}_ranking (
 
 D7 = """
 -- D7 run_set_difference: one row per instance. Compares the run before the
--- latest (run_a) with the latest run (run_b): which checkpoints each has. It
--- says what differs, nothing about whether that is better or worse.
+-- latest (run_a) with the latest run (run_b): which checkpoints, which
+-- findings and which sensor blocks each has. It says what differs, nothing
+-- about whether that is better or worse.
 -- NOT_COMPUTABLE (fewer than two runs) has status and reason and nothing else.
 CREATE TABLE d7_run_set_difference (
     instance        TEXT PRIMARY KEY,                    -- its name in derivations.yaml
@@ -448,6 +449,9 @@ CREATE TABLE d7_run_set_difference (
     count_only_in_a INTEGER,                             -- checkpoints in run_a and not in run_b
     count_only_in_b INTEGER,                             -- checkpoints in run_b and not in run_a
     count_in_both   INTEGER,                             -- checkpoints in both runs
+    count_findings_only_in_a INTEGER,                    -- findings in run_a and not in run_b
+    count_findings_only_in_b INTEGER,                    -- findings in run_b and not in run_a
+    count_findings_in_both   INTEGER,                    -- findings in both runs
     path            TEXT NOT NULL                        -- derived.values.<instance>
 );
 
@@ -460,6 +464,50 @@ CREATE TABLE d7_checkpoints (
     position        INTEGER NOT NULL,                    -- order in its list, 0 = first
     path            TEXT NOT NULL,                       -- derived.values.<instance>.<membership>[position]
     PRIMARY KEY (instance, checkpoint_id)
+);
+
+-- D7 per finding: one row per finding in only_in_a, only_in_b or in_both, in
+-- its run's findings order. A finding is in both runs when its finding_id,
+-- without the run's prefix, is the same in each.
+CREATE TABLE d7_findings (
+    instance        TEXT NOT NULL REFERENCES d7_run_set_difference,
+    finding_id      TEXT NOT NULL,                       -- as recorded: run_a's for only_in_a, run_b's otherwise
+    membership      TEXT NOT NULL,                       -- only_in_a, only_in_b or in_both
+    position        INTEGER NOT NULL,                    -- order in its list, 0 = first
+    checkpoint_id   TEXT,                                -- the finding's checkpoint, from the record
+    feature         TEXT,                                -- the finding's feature, from the record
+    path            TEXT NOT NULL,                       -- derived.values.<instance>.findings_<membership>[position]
+    path_record     TEXT NOT NULL,                       -- records[i].findings[j]: the finding as recorded
+    PRIMARY KEY (instance, membership, position)
+);
+
+-- D7 per sensor block: how many checkpoints, of those on both routes, the
+-- block was available at in run_a and not run_b (only_in_a), in run_b and not
+-- run_a (only_in_b), and in both. One row per membership and block, 0 included.
+CREATE TABLE d7_block_counts (
+    instance        TEXT NOT NULL REFERENCES d7_run_set_difference,
+    membership      TEXT NOT NULL,                       -- only_in_a, only_in_b or in_both
+    block           TEXT NOT NULL,                       -- accelerometer, environment, particulate, ...
+    count           INTEGER NOT NULL,
+    path            TEXT NOT NULL,                       -- derived.values.<instance>.count_blocks_<membership>.<block>
+    PRIMARY KEY (instance, membership, block)
+);
+
+-- D7 per sensor block and checkpoint: one row per checkpoint in a block's
+-- list, in route order. A block is available at a checkpoint when its reading
+-- passes the exclusion rule there. reason is why it was not available in the
+-- other run, from that run's excluded entry: run_b's for only_in_a, run_a's
+-- for only_in_b; none for in_both.
+CREATE TABLE d7_blocks (
+    instance        TEXT NOT NULL REFERENCES d7_run_set_difference,
+    membership      TEXT NOT NULL,                       -- only_in_a, only_in_b or in_both
+    block           TEXT NOT NULL,
+    checkpoint_id   TEXT NOT NULL,
+    position        INTEGER NOT NULL,                    -- order in its list, 0 = first
+    reason          TEXT,                                -- e.g. sps30_ok=false, checkpoint status is MISSED
+    path            TEXT NOT NULL,                       -- derived.values.<instance>.blocks_<membership>.<block>[position]
+    path_excluded   TEXT,                                -- derived.excluded.<run_id>[k]: the reason's entry
+    PRIMARY KEY (instance, membership, block, position)
 );
 """
 
@@ -676,7 +724,7 @@ def build_database(extended: ExtendedRecord, config: DerivationConfig) -> sqlite
     add_grouped(conn, extended.records, extended.derived.values, config, "group_mean", "d4")
     add_grouped(conn, extended.records, extended.derived.values, config, "group_max", "d5")
     add_d6(conn, extended.records, extended.derived.values, config)
-    add_d7(conn, extended.derived.values)
+    add_d7(conn, extended.records, extended.derived.values, extended.derived.excluded)
     add_d8(conn, extended.derived.values)
     add_d9(conn, extended.derived.values)
     add_d10(conn, extended.records, extended.derived.values)
@@ -1012,18 +1060,71 @@ def add_d6(conn: sqlite3.Connection, records: Sequence[Record], values: dict, co
                 })
 
 
-def add_d7(conn: sqlite3.Connection, values: dict) -> None:
-    """d7_run_set_difference: one row; d7_checkpoints: one per checkpoint in its three lists."""
+def add_d7(conn: sqlite3.Connection, records: Sequence[Record], values: dict, excluded: dict) -> None:
+    """d7_run_set_difference: one row; d7_checkpoints and d7_findings: one per
+    checkpoint or finding in their three lists; d7_block_counts: one per list
+    and block; d7_blocks: one per checkpoint in a block's list.
+
+    A finding's path_record is where it sits in its run's findings: run_a's
+    for findings_only_in_a, run_b's for the other two. A block's reason is
+    from the excluded entries of the run it was not available in.
+    """
     lists = ("only_in_a", "only_in_b", "in_both")
+    index = {record.run_id: i for i, record in enumerate(records)}
     for instance, out in instances(values, "run_set_difference"):
         path = f"derived.values.{instance}"
-        insert(conn, "d7_run_set_difference", {"instance": instance, "path": path, **stored(out, *lists)})
+        findings = tuple(f"findings_{membership}" for membership in lists)
+        blocks = tuple(f"{prefix}_{membership}" for prefix in ("blocks", "count_blocks") for membership in lists)
+        insert(conn, "d7_run_set_difference", {
+            "instance": instance, "path": path, **stored(out, *lists, *findings, *blocks),
+        })
         for membership in lists:
             for position, cid in enumerate(out.get(membership, [])):
                 insert(conn, "d7_checkpoints", {
                     "instance": instance, "checkpoint_id": cid, "membership": membership,
                     "position": position, "path": f"{path}.{membership}[{position}]",
                 })
+        for membership in lists:
+            ids = out.get(f"findings_{membership}", [])
+            if not ids:
+                continue
+            i = index[out["run_a"] if membership == "only_in_a" else out["run_b"]]
+            where = {finding.finding_id: j for j, finding in enumerate(records[i].findings)}
+            for position, fid in enumerate(ids):
+                finding = records[i].findings[where[fid]]
+                insert(conn, "d7_findings", {
+                    "instance": instance, "finding_id": fid, "membership": membership, "position": position,
+                    "checkpoint_id": finding.checkpoint_id, "feature": finding.feature,
+                    "path": f"{path}.findings_{membership}[{position}]",
+                    "path_record": f"records[{i}].findings[{where[fid]}]",
+                })
+        for membership in lists:
+            for block, count in out.get(f"count_blocks_{membership}", {}).items():
+                insert(conn, "d7_block_counts", {
+                    "instance": instance, "membership": membership, "block": block, "count": count,
+                    "path": f"{path}.count_blocks_{membership}.{block}",
+                })
+            other = {"only_in_a": out.get("run_b"), "only_in_b": out.get("run_a")}.get(membership)
+            for block, cids in out.get(f"blocks_{membership}", {}).items():
+                for position, cid in enumerate(cids):
+                    k = exclusion(excluded.get(other, []), cid, block) if other else None
+                    insert(conn, "d7_blocks", {
+                        "instance": instance, "membership": membership, "block": block,
+                        "checkpoint_id": cid, "position": position,
+                        "reason": excluded[other][k]["reason"] if k is not None else None,
+                        "path": f"{path}.blocks_{membership}.{block}[{position}]",
+                        "path_excluded": f"derived.excluded.{other}[{k}]" if k is not None else None,
+                    })
+
+
+def exclusion(entries: list[dict], checkpoint_id: str, block: str) -> int | None:
+    """Where in a run's excluded entries the block at this checkpoint is, or
+    None. A reason that covered every checkpoint is one entry scoped __run__."""
+    for scope in (checkpoint_id, "__run__"):
+        for k, entry in enumerate(entries):
+            if entry["scope"] == scope and entry["block"] == block:
+                return k
+    return None
 
 
 def add_d8(conn: sqlite3.Connection, values: dict) -> None:

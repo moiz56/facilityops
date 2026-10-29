@@ -159,10 +159,19 @@ itself.
   name the one whose reading and source (samples or checkpoints) the question
   matches.
 - A difference compares two runs only: the latest and the one before it. It
-  holds the checkpoint ids only the earlier run's record lists, only the
-  latest's lists, and both list, and how many of each. Its runs are [-2, -1];
-  to compare any other runs' checkpoints, abstain. It says nothing about
-  readings or results, and never whether a change is better or worse.
+  compares three things, nothing else:
+    - checkpoints: the ids only the earlier run's record lists, only the
+      latest's lists, and both list
+    - findings: which only the earlier run recorded, which only the latest
+      recorded (new), and which both recorded. A finding is a problem found
+      at a checkpoint, something that should not be there: "problems",
+      "issues", "faults" and "things flagged" are findings
+    - sensor blocks: for each block, the checkpoints on both routes where it
+      was available only in the earlier run (dropped out), only in the
+      latest, and in both, with why it was not available
+  and how many of each. Its runs are [-2, -1]; to compare any other runs,
+  abstain. For any other comparison between runs, such as coverage,
+  evidence, readings, results or alerts, it has nothing: do not name it. It never says whether a change is better or worse.
 - A date range is one figure for all runs together: the earliest and latest
   run start and which runs they were, the whole days between them, how many
   runs are loaded, and on how many of those days a run was taken and on how
@@ -369,7 +378,11 @@ def describe(name: str, derivation: DerivationConfig) -> str:
     entry = derivation.derivations[name]
     if entry["type"] == "run_set_difference":
         return (f"- {name}: difference. Which checkpoints only the run before the latest had, only the latest "
-                f"run had, and both had, and how many of each")
+                f"run had, and both had, and how many of each; and the same for findings: which are new in the "
+                f"latest run, which only the earlier run had, and which both had; and for each sensor block, "
+                f"the checkpoints where it was available only in the earlier run (dropped out), only in the "
+                f"latest, and in both, and why it was not. Checkpoints, findings and sensor blocks only: no "
+                f"other comparison between runs")
     if entry["type"] == "run_date_range":
         return (f"- {name}: date range. Across all runs: the earliest and latest start time and which runs "
                 f"they were, the days between them, how many runs, and how many days had a run and how many "

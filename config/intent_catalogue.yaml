@@ -55,10 +55,13 @@ categories:
 
   - name: Comparing runs
     description: >-
-      Which checkpoints the latest run and the one before it had in common,
-      and which only one of them had.
+      Which checkpoints, which findings and which working sensor blocks the
+      latest run and the one before it had in common, and which only one of
+      them had.
     examples:
       - "Which checkpoints differ between the last two runs?"  # run_set_difference
+      - "Which findings are new since the previous run?"       # run_set_difference
+      - "Which sensor blocks were available last run but not this one?"   # run_set_difference
 
   - name: Findings and alerts
     description: >-
