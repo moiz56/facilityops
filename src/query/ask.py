@@ -76,8 +76,19 @@ def load_settings(root: Path) -> Settings:
     )
 
 
-def log_answer(question: str, context: QueryContext, answer_envelope: dict, settings: Settings) -> None:
-    """Append one line for this question to the asking tenant's log."""
+def log_answer(
+    question: str, context: QueryContext, answer_envelope: dict, settings: Settings,
+    route: str | None = None, routed_to: list[str] | None = None,
+) -> None:
+    """Append one line for this question to the asking tenant's log.
+
+    route is what the retrieval router chose: derivation, lookup, catalogue or
+    abstain. None when it never ran or its reply was rejected.
+
+    routed_to is what the second router chose: the derivation instances for a
+    derivation question, the lookup tables for a lookup one. None when that
+    router never ran, its reply was rejected, or it abstained.
+    """
     output = answer_envelope["output"] or {}
     append_entry(settings.query_logs / f"{context.tenant_id}.logs", {
         "tenant_id": context.tenant_id,
@@ -85,6 +96,8 @@ def log_answer(question: str, context: QueryContext, answer_envelope: dict, sett
         "asked_at": context.asked_at,
         "question": question,
         "intent": output.get("intent"),
+        "route": route,
+        "routed_to": routed_to,
         "records_in_scope": output.get("records_in_scope"),
         "status": answer_envelope["status"],
         "answer": output.get("answer"),
@@ -141,7 +154,13 @@ def ask(question: str, context: QueryContext, settings: Settings, verbose: bool 
         "B-1", settings.provider.model, settings.b1.prompt_version, run_ids,
         result.status, output, result.verification,
     )
-    log_answer(question, context, answer_envelope, settings)
+    trace = result.trace or {}
+    retrieval = trace.get("retrieval", {}).get("result")
+    chosen = trace.get("router", {}).get("route")
+    routed_to = None
+    if chosen and not chosen["abstain"]:
+        routed_to = chosen["derivations"] if "derivations" in chosen else chosen["tables"]
+    log_answer(question, context, answer_envelope, settings, retrieval["kind"] if retrieval else None, routed_to)
 
     if verbose:
         print(json.dumps(answer_envelope, indent=2))
