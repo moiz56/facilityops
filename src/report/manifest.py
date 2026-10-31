@@ -24,6 +24,7 @@ from common.paths import CONFIG_PATH, ResolvedImage, load_config, setting
 from common.provenance import Provenance, stamp
 from common.readability import CouldNotRead
 from common.schema import Record
+from common.signoff import RowSignOff
 from report.derive import alert_counts, computed_counts, declared_counts
 from report.gaps import RUN_LEVEL, Gap
 from report.render import PageMap
@@ -58,6 +59,7 @@ def build_manifest(
     pages: PageMap | None = None,
     config: dict | None = None,
     could_not_read: list[CouldNotRead] | None = None,
+    row_signoff: list[RowSignOff] | None = None,
 ) -> dict:
     """Build the manifest for one run.
 
@@ -78,6 +80,10 @@ def build_manifest(
 
     `could_not_read` is the list the report printed. The pipeline builds it
     once and passes it to both, so the two hold the same entries.
+
+    `row_signoff` is the same, for the rows the report signed off. Each entry
+    carries the sign-off's own fields and not the list of what was not covered,
+    which only the report's wording uses.
     """
     found = [image for images_of in images.values() for image in images_of]
 
@@ -109,6 +115,7 @@ def build_manifest(
         "images_rendered": sum(1 for image in found if image.readable),
         "gaps": [asdict(gap) for gap in gaps],
         "could_not_read": [asdict(entry) for entry in could_not_read or []],
+        "row_signoff": [entry.output() for entry in row_signoff or []],
         "counts": {
             "declared": asdict(declared_counts(record)),
             "computed": asdict(computed_counts(record)),

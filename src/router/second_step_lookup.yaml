@@ -1,0 +1,68 @@
+router_type: indexed
+encoder:
+  type: fastembed
+  name: BAAI/bge-small-en-v1.5
+sparse_encoder: null
+alpha: 0.7
+top_k: 5
+aggregation: mean
+index:
+  type: local
+confidence_threshold: 0.6
+calibrator:
+  method: platt
+  params:
+    a:
+    - 9.819188266446481
+    b:
+    - -6.669877933300741
+refresh_interval: null
+routes:
+- name: zones
+  utterances:
+  - which zones did the route cover last run
+  - what zone comes after <zone-id>
+  - list the zones in route order
+  - what's the first zone the robot visits
+  - what areas does the route go through
+  - which zone is the last one before docking
+  - what zone comes before <zone-id>
+  - show me the zones for the latest run
+  - did the route go through <zone-id> on the last run
+  - what order are the zones visited in
+  description: null
+  confidence_threshold: null
+  metadata: {}
+- name: checkpoints
+  utterances:
+  - <checkpoint-id> inspection on the most recent run
+  - when did we last inspect <checkpoint-id>
+  - what did <checkpoint-id> show most recently
+  - What happened at <checkpoint-id> on 28 July?
+  - <checkpoint-id> on the 28th
+  - what did <checkpoint-id> show on july 28
+  - Which checkpoints are in zone <checkpoint-id>?
+  - what's in zone 3
+  - list the checkpoints for that zone
+  description: null
+  confidence_threshold: null
+  metadata: {}
+- name: checkpoint_readings
+  utterances:
+  - What sensor readings were recorded at <checkpoint-id>?
+  - sensor data for <checkpoint-id>
+  - what did the hub read at <checkpoint-id>
+  - What could not be read on the most recent run?
+  - anything unreadable
+  - what couldn't the robot read
+  description: null
+  confidence_threshold: null
+  metadata: {}
+- name: evidence
+  utterances:
+  - Show me the evidence captured at ac_2 on the most recent run.
+  - what photos do we have for <checkpoint-id>
+  - evidence at <checkpoint-id> last run
+  description: null
+  confidence_threshold: null
+  metadata: {}

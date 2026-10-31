@@ -99,7 +99,7 @@ CREATE TABLE rec_findings (
     position           INTEGER NOT NULL,                 -- order in the run's findings, 0 = first
     finding_id         TEXT NOT NULL,
     severity           TEXT,                             -- info, warning or fail
-    status             TEXT,                             -- logged, acknowledged or abstained (needs human review)
+    status             TEXT,                             -- as recorded: logged, acknowledged, needs_review (nobody has looked yet) or abstained (the detector would not call it)
     timestamp          TEXT,
     checkpoint_id      TEXT,                             -- the checkpoint it came from
     zone               TEXT,

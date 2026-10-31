@@ -73,6 +73,24 @@ could_not_read:                    # captured, but could not be read. Not a gap,
       meaning: a detector declined to call it
       finding_status: [abstained]
 
+signoff:                           # row sign-off: how much of each row a run could read. Coverage, not condition
+  threshold: 0.90                  # TUNABLE. Below it a row is not signed off
+  rows_dir: config/signoff         # one file per facility_id: its rows and expected subjects
+  shortfall:                       # category -> what it means and what produces it. Checked in this order
+    missed_checkpoints:
+      meaning: not in the run, or the robot did not complete it
+      completed_status: COMPLETED  # any other checkpoint status is missed
+    unresolved_captures:
+      meaning: reached, but not one of its images is a readable file
+    unscoreable_captures:
+      meaning: its images are fine, but it has no verdict
+      verdicts: [PASS, FAIL, WARN] # a result_status outside these is unscoreable
+    could_not_read:
+      meaning: a could_not_read entry names it
+    abstained:
+      meaning: one of its own detections abstained
+      detection_status: [abstained]
+
 sections:
   cover: true
   coverage: true

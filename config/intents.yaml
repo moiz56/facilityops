@@ -8,4 +8,64 @@
 intent_set_version: "1.0"
 
 routing:
-  min_confidence: 0.6     # TUNABLE (brief 3.3). Below this the question is unroutable.
+  min_confidence: 0.1     # TUNABLE
+
+  # true: the second-step semantic router must back the model's derivation or
+  # lookup picks, each at or above its minimum under second_step, or the
+  # question is unroutable. false: the picks go ahead unchecked, and the
+  # answer has no second_step_confidence. The first-step check is not affected.
+  second_step_check: false
+
+  # A route's own minimum, in place of min_confidence. A route not listed uses
+  # min_confidence. Uncomment a line to set one; each must be above 0 and at most 1.
+  first_step:
+    lookup: 0.25
+    derivation: 0.25
+    abstain: 0.25
+  second_step:
+    derivation:
+      threshold_compare: 0.25
+      condition_count: 0.25
+      proportion: 0.25
+      group_mean: 0.25
+      group_max: 0.25
+      rank_top_n: 0.25
+      run_set_difference: 0.25
+      run_date_range: 0.25
+      sensor_alert_count: 0.25
+      evidence_count: 0.25
+      count_check: 0.25
+      records: 0.25
+    lookup:
+      zones: 0.25
+      checkpoints: 0.25
+      checkpoint_readings: 0.25
+      evidence: 0.25
+
+# The category each route's answer falls in, written to the answer's
+# output.intent and so to the query log. A derivation is looked up by its
+# type: group_mean_temperature_c as group_mean. When the model picks more than
+# one, the first pick's category is the answer's. An abstained answer is
+# abstain_<reason> (causation, prediction, determination or not_captured),
+# the reason the router gave, or "abstain" when code abstained and no router
+# gave one. An unroutable question has no intent (null).
+categories:
+  catalogue: corpus
+  derivation:
+    threshold_compare: aggregation
+    condition_count: aggregation
+    proportion: aggregation
+    group_mean: aggregation
+    group_max: aggregation
+    rank_top_n: aggregation
+    run_set_difference: comparison
+    run_date_range: corpus
+    sensor_alert_count: aggregation
+    evidence_count: evidence
+    count_check: coverage
+    records: retrieval
+  lookup:
+    zones: retrieval
+    checkpoints: retrieval
+    checkpoint_readings: retrieval
+    evidence: evidence

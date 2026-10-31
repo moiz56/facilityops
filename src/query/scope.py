@@ -83,10 +83,15 @@ def resolve(context: QueryContext, tenants: dict, root: Path) -> list[Record]:
         raise ScopeError("tenants.yaml: 'data_dir' must be a path")
     if not isinstance(patterns, list) or not patterns:
         raise ScopeError("tenants.yaml: 'record_patterns' must be a non-empty list")
+    if not all(isinstance(p, str) and "{facility_id}" in p for p in patterns):
+        raise ScopeError("tenants.yaml: every 'record_patterns' entry must contain {facility_id}")
 
+    # Only the allowed facilities' folders are read. The facility_id check
+    # below still decides: a run filed under the wrong folder is dropped.
+    scoped = [p.replace("{facility_id}", facility_id) for facility_id in sorted(allowed) for p in patterns]
     return [
         record
-        for record in load_corpus(root / data_dir, patterns)
+        for record in load_corpus(root / data_dir, scoped)
         if record.facility_id in allowed and in_window(record, window)
     ]
 

@@ -92,6 +92,7 @@ def write_answer_pdf(
         "generated_at": envelope["generated_at"],
         "status": "ABSTAINED" if answer == ABSTAIN else result.status,
         "status_style": "info" if answer == ABSTAIN else STATUS_STYLE.get(result.status, "other"),
+        "intent": (envelope.get("output") or {}).get("intent"),   # set by the query layer; agents.main has none
         "answer": segments(answer, citations) if answer else None,
         "degraded": result.status == "DEGRADED_TEMPLATE_ONLY",
         "reason": result.reason or "",

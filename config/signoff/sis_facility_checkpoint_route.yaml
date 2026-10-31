@@ -1,0 +1,16 @@
+# Row sign-off: the rows of sis_facility_checkpoint_route.
+#
+# Each row lists the checkpoints it covers and the subjects expected in it.
+# This route has no racks, so its checkpoints form one row. The dock
+# (home_docking_station) is in no row and is not signed off.
+#
+# expected_subjects is a PLACEHOLDER (the row's checkpoint count) until the
+# client sends the real counts.
+
+facility_id: sis_facility_checkpoint_route
+
+rows:
+  row_a:
+    checkpoints: [checkpoint_1, checkpoint_2, checkpoint_3, checkpoint_4,
+                  checkpoint_5, checkpoint_6, checkpoint_7]
+    expected_subjects: 7         # TUNABLE, PLACEHOLDER

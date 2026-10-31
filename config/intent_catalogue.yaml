@@ -29,11 +29,12 @@ categories:
   - name: Results and status
     description: >-
       Which checkpoints passed or failed, how many were completed, and the
-      status of each finding.
+      status and feature of each finding.
     examples:
       - "Which checkpoints failed in the latest run?"          # condition_count
       - "What share of checkpoints were completed?"            # proportion
       - "How many findings need review?"                       # condition_count_finding_status
+      - "How many findings were recorded, by feature?"         # condition_count_finding_feature
 
   - name: Sensor readings
     description: >-

@@ -1,0 +1,23 @@
+# Row sign-off: the rows of sis_racks_checkpoint_route.
+#
+# Each row lists the checkpoints it covers and the subjects expected in it.
+# Checkpoints in no row (ac_1, ac_2, dock_standoff) are not signed off.
+#
+# expected_subjects is a PLACEHOLDER (the row's checkpoint count) until the
+# client sends the real counts.
+
+facility_id: sis_racks_checkpoint_route
+
+rows:
+  row_a:
+    checkpoints: [a1_front, a2_front, a3_front, a4_front, a5_front, a6_front, a7_front,
+                  a1_back, a2_back, a3_back, a4_back, a5_back, a6_back]
+    expected_subjects: 13        # TUNABLE, PLACEHOLDER
+  row_b:
+    checkpoints: [b1_front, b2_front, b3_front, b4_front, b5_front, b6_front, ups_front,
+                  b1_back, b2_back, b3_back, b4_back, b5_back, b6_back, ups_back]
+    expected_subjects: 14        # TUNABLE, PLACEHOLDER
+  row_c:
+    checkpoints: [c1_front, c2_front, c3_front, c4_front, c5_front,
+                  c1_back, c2_back, c3_back, c4_back, c5_back, c6_back, c7_back]
+    expected_subjects: 12        # TUNABLE, PLACEHOLDER

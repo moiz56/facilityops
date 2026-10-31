@@ -1,0 +1,319 @@
+# Labels for the question sets' questions, for training the routers.
+# Written by router.label_question_set. Edit any label you disagree with;
+# 'from' says whether the question set or the model gave it.
+labels:
+- id: Q01
+  question: a3_front inspection on the most recent run
+  first_step: lookup
+  second_step: checkpoints
+  from: claude-haiku-5-5
+  reason: Asks for the recorded status and verdict of a named checkpoint on a run,
+    which is read straight from the checkpoints table.
+- id: Q02
+  question: Show me the evidence captured at ac_2 on the most recent run.
+  first_step: lookup
+  second_step: evidence
+  from: claude-haiku-5-5
+  reason: Asks for the image files captured at a named checkpoint, which the evidence
+    table holds as recorded.
+- id: Q03
+  question: Which checkpoint recorded the highest vibration in the most recent run?
+  first_step: derivation
+  second_step: group_max
+  from: question set
+  reason: requires_derivations
+- id: Q04
+  question: How many checkpoints exceeded the temperature threshold on the most recent
+    run?
+  first_step: derivation
+  second_step: threshold_compare
+  from: claude-haiku-5-5
+  reason: Counts checkpoints whose temperature reading went over a configured limit,
+    so it is a reading-against-limit comparison.
+- id: Q05
+  question: What proportion of checkpoints on the most recent run completed?
+  first_step: derivation
+  second_step: proportion
+  from: question set
+  reason: requires_derivations
+- id: Q06
+  question: Which zone had the highest average vibration?
+  first_step: derivation
+  second_step: group_mean
+  from: question set
+  reason: requires_derivations
+- id: Q07
+  question: How many findings were recorded on the most recent run, by status?
+  first_step: derivation
+  second_step: condition_count
+  from: question set
+  reason: requires_derivations
+- id: Q08
+  question: What is different between the two most recent runs?
+  first_step: derivation
+  second_step: run_set_difference
+  from: question set
+  reason: requires_derivations
+- id: Q09
+  question: Which checkpoints failed on both of the last two runs?
+  first_step: derivation
+  second_step: run_set_difference
+  from: claude-haiku-5-5
+  reason: Finds checkpoints that appear as failed in both of two runs, which is an
+    overlap between runs.
+- id: Q10
+  question: Which checkpoints appear in the most recent run but not the previous one?
+  first_step: derivation
+  second_step: run_set_difference
+  from: question set
+  reason: requires_derivations
+- id: Q11
+  question: What checkpoint was missed on the most recent run and why?
+  first_step: derivation
+  second_step: records
+  from: claude-haiku-5-5
+  reason: Asks why a checkpoint was missed, which is the missed reason the run wrote
+    down as written.
+- id: Q12
+  question: Have any checkpoints been missed on the first run?
+  first_step: derivation
+  second_step: condition_count
+  from: claude-haiku-5-5
+  reason: Asks whether any checkpoints met the missed-status condition in one run,
+    which is a count over checkpoints.
+- id: Q13
+  question: Which sensor blocks were unavailable on the most recent run and why?
+  first_step: derivation
+  second_step: records
+  from: claude-haiku-5-5
+  reason: Asks which sensor blocks were unavailable and why, which is recorded sensor
+    availability as written.
+- id: Q14
+  question: Are there any findings marked abstained along with where?
+  first_step: derivation
+  second_step: condition_count
+  from: claude-haiku-5-5
+  reason: Counts findings by status (abstained) and gives their locations, which is
+    findings counted by status.
+- id: Q15
+  question: List the five highest vibration readings on the most recent run.
+  first_step: derivation
+  second_step: rank_top_n
+  from: question set
+  reason: requires_derivations
+- id: Q16
+  question: How many runs have been recorded, over what period?
+  first_step: derivation
+  second_step: run_date_range
+  from: question set
+  reason: requires_derivations
+- id: Q17
+  question: Why did vibration at checkpoint_5 increase between the two runs?
+  first_step: abstain
+  second_step: null
+  from: question set
+  reason: must_abstain
+- id: Q18
+  question: Is the equipment in checkpoint_6's zone likely to fail?
+  first_step: abstain
+  second_step: null
+  from: question set
+  reason: must_abstain
+- id: Q19
+  question: What is the manufacturer of the sensor hub?
+  first_step: abstain
+  second_step: null
+  from: question set
+  reason: must_abstain
+- id: Q20
+  question: How long has this route been in operation?
+  first_step: abstain
+  second_step: null
+  from: question set
+  reason: must_abstain
+- id: Q21
+  question: What happened at checkpoint_4 on 28 July?
+  first_step: lookup
+  second_step: checkpoints
+  from: claude-haiku-5-5
+  reason: Asks what a named checkpoint recorded on a given date, a direct read of
+    the checkpoint record.
+- id: Q22
+  question: Which checkpoints are in zone checkpoint_3?
+  first_step: lookup
+  second_step: checkpoints
+  from: claude-haiku-5-5
+  reason: Asks which checkpoints are in a zone, which the checkpoints table records
+    as zone membership.
+- id: Q23
+  question: What sensor readings were recorded at checkpoint_1?
+  first_step: lookup
+  second_step: checkpoint_readings
+  from: claude-haiku-5-5
+  reason: Asks for the sensor readings recorded at a named checkpoint, which is exactly
+    what the readings table holds.
+- id: Q24
+  question: What operator notes are recorded against checkpoint_1?
+  first_step: derivation
+  second_step: records
+  from: claude-haiku-5-5
+  reason: Asks for operator notes as written against a checkpoint, which is the records
+    route.
+- id: Q25
+  question: What findings are recorded at checkpoint_4?
+  first_step: derivation
+  second_step: records
+  from: claude-haiku-5-5
+  reason: Asks for findings recorded at a checkpoint as written, and findings are
+    part of the records route.
+- id: Q26
+  question: How many checkpoints failed on the most recent run?
+  first_step: derivation
+  second_step: condition_count
+  from: question set
+  reason: requires_derivations
+- id: Q27
+  question: How many sensor alerts were logged, by severity?
+  first_step: derivation
+  second_step: condition_count
+  from: question set
+  reason: requires_derivations
+- id: Q28
+  question: What proportion of referenced images resolved?
+  first_step: derivation
+  second_step: proportion
+  from: question set
+  reason: requires_derivations
+- id: Q29
+  question: Which zone had the highest average temperature?
+  first_step: derivation
+  second_step: group_mean
+  from: question set
+  reason: requires_derivations
+- id: Q30
+  question: How many findings were recorded, by feature?
+  first_step: derivation
+  second_step: condition_count
+  from: question set
+  reason: requires_derivations
+- id: Q31
+  question: Which checkpoint recorded the highest temperature?
+  first_step: derivation
+  second_step: group_max
+  from: question set
+  reason: requires_derivations
+- id: Q32
+  question: Which checkpoints captured no evidence?
+  first_step: derivation
+  second_step: condition_count
+  from: claude-haiku-5-5
+  reason: Finds which checkpoints meet the condition of having no evidence, which
+    is a count over checkpoints.
+- id: Q33
+  question: What thermal coverage exists on the most recent run?
+  first_step: derivation
+  second_step: evidence_count
+  from: claude-haiku-5-5
+  reason: Asks how many thermal images exist across a run, which is an evidence count
+    by image type.
+- id: Q34
+  question: What could not be read on the most recent run?
+  first_step: lookup
+  second_step: checkpoint_readings
+  from: claude-haiku-5-5
+  reason: Asks which readings were left out and why, which the checkpoint readings
+    table records for untrusted readings.
+- id: Q35
+  question: Do the declared counts match the checkpoints in the record?
+  first_step: derivation
+  second_step: condition_count
+  from: question set
+  reason: requires_derivations
+- id: Q36
+  question: Which findings are new since the previous run?
+  first_step: derivation
+  second_step: run_set_difference
+  from: question set
+  reason: requires_derivations
+- id: Q37
+  question: Which findings appear in both of the last two runs?
+  first_step: derivation
+  second_step: run_set_difference
+  from: question set
+  reason: requires_derivations
+- id: Q38
+  question: How did coverage change between the last two runs?
+  first_step: derivation
+  second_step: run_set_difference
+  from: claude-haiku-5-5
+  reason: Compares checkpoint coverage between the last two runs, which is a difference
+    between runs.
+- id: Q39
+  question: Which sensor blocks were available last run but not this one?
+  first_step: derivation
+  second_step: run_set_difference
+  from: claude-haiku-5-5
+  reason: Finds sensor blocks present in the previous run but not the latest, which
+    is a set difference between runs.
+- id: Q40
+  question: What is the overall result of the most recent run?
+  first_step: derivation
+  second_step: records
+  from: claude-haiku-5-5
+  reason: Asks for the overall result of a run, which is the run status the run wrote
+    down as written.
+- id: Q41
+  question: Which findings have no configured action?
+  first_step: derivation
+  second_step: condition_count
+  from: claude-haiku-5-5
+  reason: Counts findings that meet the condition of having no configured action,
+    which is a count over findings.
+- id: Q42
+  question: When was this route last run?
+  first_step: derivation
+  second_step: run_date_range
+  from: question set
+  reason: requires_derivations
+- id: Q43
+  question: What questions can I ask about these records?
+  first_step: catalogue
+  second_step: null
+  from: claude-haiku-5-5
+  reason: Asks what can be asked of the records, which is a catalogue question.
+- id: Q44
+  question: Is the equipment at checkpoint_4 safe to operate?
+  first_step: abstain
+  second_step: null
+  from: question set
+  reason: must_abstain
+- id: Q45
+  question: Is this facility compliant with NFPA 70B?
+  first_step: abstain
+  second_step: null
+  from: question set
+  reason: must_abstain
+- id: Q46
+  question: What caused the finding at checkpoint_4?
+  first_step: abstain
+  second_step: null
+  from: question set
+  reason: must_abstain
+- id: Q47
+  question: When will the equipment at checkpoint_6 need replacing?
+  first_step: abstain
+  second_step: null
+  from: question set
+  reason: must_abstain
+- id: Q48
+  question: Is a vibration reading of 2.9 g normal for this equipment?
+  first_step: abstain
+  second_step: null
+  from: question set
+  reason: must_abstain
+- id: Q49
+  question: Who was responsible for the obstruction at checkpoint_4?
+  first_step: abstain
+  second_step: null
+  from: question set
+  reason: must_abstain

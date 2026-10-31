@@ -1,13 +1,14 @@
 # tenant to facility mapping
 #
 # Read only by src/query/scope.py. Each tenant maps to the facility_ids it
-# owns. A record belongs to a tenant by the facility_id inside it, not by the
-# folder it sits in. A facility listed under two tenants is an ambiguous
-# mapping and is refused, never guessed.
+# owns. Only the tenant's own facility folders are read, and a record still
+# belongs to a tenant by the facility_id inside it, not by the folder it sits
+# in: a run in the wrong folder is dropped, never shown. A facility listed
+# under two tenants is an ambiguous mapping and is refused, never guessed.
 
 data_dir: data_tenant              # the tenant corpus, relative to the project root
-record_patterns:
-  - "*/*/run.json"                 # data_tenant/<facility_id>/<run>/run.json
+record_patterns:                   # {facility_id} is filled with each facility the tenant may see
+  - "{facility_id}/*/run.json"     # data_tenant/<facility_id>/<run>/run.json
 
 # One tenant per facility. The sim_ tenants are simulator output with
 # fabricated readings.

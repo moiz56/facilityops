@@ -1,6 +1,0 @@
-# Milestone 3: row sign-off (brief section 6).
-#
-# Expected subjects per row are supplied by the client. A row whose
-# confidence is below the threshold is reported as not signed off.
-
-threshold: 0.90           # TUNABLE (brief 6.4)
