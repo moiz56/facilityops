@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents.b1_analytical import ABSTAIN, answer_question
+from agents.b1_analytical_router_derived import RECORDS
 from agents.b1_answer_pdf import write_answer_pdf
 from agents.b1_catalogue import check_catalogue
 from agents.database_derivation import open_database
@@ -24,7 +25,7 @@ from agents.utils import (
     b1_config, derivation_config, eligibility_by_run, hash_configs, load_env,
     print_b1_answer, print_b1_trace, print_runs, provider_config, verification_config,
 )
-from common.paths import load_config, setting
+from common.paths import ConfigError, load_config, setting
 from query.query_log import append_entry
 from query.scope import QueryContext, resolve
 
@@ -46,6 +47,7 @@ class Settings:
     b1_answers: Path                 # where the answer PDF is written
     evidence_root: Path              # where the PDF's evidence image paths resolve
     query_logs: Path                 # one <tenant_id>.logs file per tenant
+    categories: dict                 # intents.yaml's categories: each route's answer category
 
 
 def load_settings(root: Path) -> Settings:
@@ -57,6 +59,7 @@ def load_settings(root: Path) -> Settings:
     agents = load_config(config / "agents.yaml")
     tenants = load_config(config / "tenants.yaml")
     catalogue = check_catalogue(load_config(config / "intent_catalogue.yaml"))
+    intents = load_config(config / "intents.yaml")
 
     load_env(root / ".env")
     return Settings(
@@ -73,7 +76,39 @@ def load_settings(root: Path) -> Settings:
         b1_answers=root / setting(paths, "agent", "b1_answers"),
         evidence_root=root / setting(paths, "agent", "evidence_root"),
         query_logs=root / setting(paths, "agent", "query_logs"),
+        categories=intents.get("categories") or {},
     )
+
+
+def answer_intent(
+    answer: str, route: str | None, routed_to: list[str] | None, trace: dict, settings: Settings,
+) -> str | None:
+    """The category the answer falls in, from intents.yaml's categories.
+
+    When B-1 abstained: abstain_<reason>, the abstain_reason the first step
+    or the next router gave (in B-1's trace), or abstain when code abstained
+    and no router gave one. Otherwise the category of the route, or for
+    derivation and lookup of its first pick: a derivation by its type. None
+    when nothing was routed.
+    """
+    if route is None:
+        return None
+    if answer == ABSTAIN:
+        first = (trace.get("retrieval") or {}).get("result") or {}
+        after = (trace.get("router") or {}).get("route") or {}
+        reason = first.get("abstain_reason") or after.get("abstain_reason")
+        return f"abstain_{reason}" if reason else "abstain"
+    if route not in ("derivation", "lookup"):
+        return settings.categories.get(route)
+    if not routed_to:
+        return None
+    pick = routed_to[0]
+    if route == "derivation" and pick != RECORDS:
+        pick = settings.derivation.derivations[pick]["type"]
+    category = (settings.categories.get(route) or {}).get(pick)
+    if category is None:
+        raise ConfigError(f"intents.yaml: categories.{route}.{pick} is missing")
+    return category
 
 
 def log_answer(
@@ -121,7 +156,7 @@ def ask(question: str, context: QueryContext, settings: Settings, verbose: bool 
 
     records = resolve(context, settings.tenants, settings.root)
     if not records:
-        output = {"answer": ABSTAIN, "citations": [], "records_consulted": [], "records_in_scope": 0}
+        output = {"answer": ABSTAIN, "citations": [], "records_consulted": [], "intent": None, "records_in_scope": 0}
         answer_envelope = envelope("B-1", None, settings.b1.prompt_version, [], "OK", output, None)
         log_answer(question, context, answer_envelope, settings)
         if verbose:
@@ -146,21 +181,26 @@ def ask(question: str, context: QueryContext, settings: Settings, verbose: bool 
         question, extended, conn, settings.provider, settings.b1,
         settings.derivation, settings.verification, lookup_conn, settings.catalogue,
     )
+    trace = result.trace or {}
+    retrieval = trace.get("retrieval", {}).get("result")
+    route = retrieval["kind"] if retrieval else None
+    chosen = trace.get("router", {}).get("route")
+    routed_to = None
+    if chosen and not chosen["abstain"]:
+        routed_to = chosen["derivations"] if "derivations" in chosen else chosen["tables"]
+
     output = result.output
     if output is not None:
-        output = {**output, "records_in_scope": len(records)}
+        output = {
+            **output, "intent": answer_intent(output["answer"], route, routed_to, trace, settings),
+            "records_in_scope": len(records),
+        }
     run_ids = (output or {}).get("records_consulted") or [r.run_id for r in records]
     answer_envelope = envelope(
         "B-1", settings.provider.model, settings.b1.prompt_version, run_ids,
         result.status, output, result.verification,
     )
-    trace = result.trace or {}
-    retrieval = trace.get("retrieval", {}).get("result")
-    chosen = trace.get("router", {}).get("route")
-    routed_to = None
-    if chosen and not chosen["abstain"]:
-        routed_to = chosen["derivations"] if "derivations" in chosen else chosen["tables"]
-    log_answer(question, context, answer_envelope, settings, retrieval["kind"] if retrieval else None, routed_to)
+    log_answer(question, context, answer_envelope, settings, route, routed_to)
 
     if verbose:
         print(json.dumps(answer_envelope, indent=2))

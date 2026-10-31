@@ -80,6 +80,13 @@ derivations:
     scope: findings
     by_value: status
     expected: [logged, needs_review, abstained]
+  # Features are not a fixed list: every feature found is its own row, as
+  # recorded. Ones that sound alike are never merged.
+  condition_count_finding_feature:
+    type: condition_count
+    scope: findings
+    by_value: feature
+    expected: []
   # D3: share of the items of `scope` in each run for which the
   # named condition holds. numerator = matching items, denominator = eligible items.
   proportion:

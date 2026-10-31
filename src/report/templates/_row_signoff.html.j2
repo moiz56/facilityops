@@ -1,0 +1,83 @@
+{# Row sign-off: how much of each row this run can tell us about.
+
+   The same rows the manifest carries in its `row_signoff` array, in the same
+   order. Confidence is coverage, not condition, and the page says so in
+   words, so nobody reads it as a health score. A row below its threshold is
+   "Not signed off", never "signed off with low confidence", and every row
+   lists what was not covered and why. #}
+{% set category_labels = {
+  "missed_checkpoints": "Missed checkpoint",
+  "unresolved_captures": "Unresolved capture",
+  "unscoreable_captures": "Unscoreable capture",
+  "could_not_read": "Could not read",
+  "abstained": "Abstained",
+} %}
+<section class="section row-signoff" id="row-signoff">
+
+  <h2>Row sign-off</h2>
+
+  {% if row_signoff %}
+    <p class="lede">
+      Confidence is how much of each row this run could read: the readable
+      checkpoints out of the checkpoints the row expects. It says nothing about
+      condition. A row where every checkpoint was read and every one failed has
+      100% confidence. A row below its threshold is not signed off.
+    </p>
+
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Row</th>
+          <th>Result</th>
+          <th>Confidence</th>
+          <th>Readable</th>
+          <th>Expected</th>
+          <th>Threshold</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in row_signoff %}
+          <tr>
+            <td>{{ entry.row_id }}</td>
+            <td>{{ "Not signed off" if entry.below_threshold else "Signed off" }}</td>
+            <td>{{ entry.confidence_formatted }}</td>
+            <td>{{ entry.readable_subjects }}</td>
+            <td>{{ entry.expected_subjects }}</td>
+            <td>{{ "%g%%" | format((entry.threshold * 100) | round(4)) }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% for entry in row_signoff if entry.uncovered %}
+      <h3>{{ entry.row_id }}: not covered</h3>
+      <p class="gap-count">
+        {{ entry.uncovered | length }} of {{ entry.expected_subjects }} checkpoint{{ "" if entry.expected_subjects == 1 else "s" }}
+        could not be counted as read.
+      </p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Checkpoint</th>
+            <th>Why</th>
+            <th>Detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in entry.uncovered %}
+            <tr>
+              <td>{{ item.checkpoint_id }}</td>
+              <td>{{ category_labels[item.category] }}</td>
+              <td>{{ item.reason }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endfor %}
+  {% else %}
+    <p class="absent-note">
+      No rows are defined for this facility, so no row on this run is signed off.
+    </p>
+  {% endif %}
+
+</section>

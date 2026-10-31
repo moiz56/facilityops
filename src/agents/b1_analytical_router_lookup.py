@@ -23,7 +23,7 @@ from typing import Sequence
 
 from common.schema import Record
 from agents.b1_analytical_router_derived import (
-    PLACES, RouteError, check_places, layout, resolve_runs, run_days,
+    ABSTAIN_REASON_SCHEMA, PLACES, RouteError, check_abstain_reason, check_places, layout, resolve_runs, run_days,
 )
 from agents.database_lookup import TABLES
 from agents.provider import Provider
@@ -134,8 +134,8 @@ Days the runs started on:
 
 HOW TO REPLY
 Reply with JSON only, one of:
-  {"intent": "answer", "runs": ..., "zones": [...], "checkpoints": [...], "fields": [...], "tables": [...]}
-  {"intent": "abstain", "runs": "all", "zones": [], "checkpoints": [], "fields": [], "tables": []}
+  {"intent": "answer", "abstain_reason": null, "runs": ..., "zones": [...], "checkpoints": [...], "fields": [...], "tables": [...]}
+  {"intent": "abstain", "abstain_reason": "<one of the four below>", "runs": "all", "zones": [], "checkpoints": [], "fields": [], "tables": []}
 
 {places}
 fields: the readings the question asks for, as written in READINGS. A field
@@ -151,8 +151,17 @@ WHEN TO ABSTAIN
 - No table above holds what the question asks for.
 - It asks for something worked out from the values: how many, an average,
   the highest or lowest, a ranking, a comparison or a change.
+  A question about one run's recorded values is not a comparison of runs,
+  even when it says "the latest run": do not abstain for that.
 - It asks why something happened, what will happen, what should be done, or
   for a judgement (better, worse, safe, normal).
+When you abstain, give abstain_reason, one of:
+  causation      it asks why something happened: "why did the temperature peak"
+  prediction     it asks what will happen: "will c4_back fail next run"
+  determination  it asks for a judgement: "is this reading normal"
+  not_captured   no table here holds it, or it asks for something worked out:
+                 "who makes the robot", "what did it cost"
+An answer gives abstain_reason null.
 
 {feedback}QUESTION
 {question}
@@ -172,6 +181,8 @@ class LookupRoute:
     fields:      the sensor blocks and fields named; [] means every field
     tables:      the lookup tables the question needs
     attempts:    model calls made
+    abstain_reason: one of ABSTAIN_REASONS when the model abstained; None
+                 otherwise, and when code abstained over a name
     """
 
     abstain: bool
@@ -182,6 +193,7 @@ class LookupRoute:
     fields: list[str]
     tables: list[str]
     attempts: int
+    abstain_reason: str | None = None
 
 
 def route_lookup(
@@ -222,6 +234,7 @@ def reply_schema() -> dict:
         "type": "object",
         "properties": {
             "intent": {"type": "string", "enum": ["answer", "abstain"]},
+            "abstain_reason": ABSTAIN_REASON_SCHEMA,
             "runs": {"anyOf": [
                 {"type": "string", "enum": ["all"]},
                 {"type": "array", "items": {"anyOf": [{"type": "integer"}, {"type": "string"}]}},
@@ -231,7 +244,7 @@ def reply_schema() -> dict:
             "fields": {"type": "array", "items": {"type": "string", "enum": sensor_names()}},
             "tables": {"type": "array", "items": {"type": "string", "enum": list(TABLES)}},
         },
-        "required": ["intent", "runs", "zones", "checkpoints", "fields", "tables"],
+        "required": ["intent", "abstain_reason", "runs", "zones", "checkpoints", "fields", "tables"],
         "additionalProperties": False,
     }
 
@@ -261,12 +274,15 @@ def parse_reply(reply: str, records: Sequence[Record], attempt: int) -> LookupRo
         raise RouteError("the reply was not valid JSON") from None
     if not isinstance(plan, dict):
         raise RouteError("the reply must be one JSON object")
-    if plan.get("intent") == "abstain":
-        return LookupRoute(True, "the model abstained", [], [], [], [], [], attempt)
-    if plan.get("intent") != "answer":
+    if plan.get("intent") not in ("answer", "abstain"):
         raise RouteError('intent must be "answer" or "abstain"')
-    if set(plan) != {"intent", "runs", "zones", "checkpoints", "fields", "tables"}:
-        raise RouteError("an answer has exactly the keys intent, runs, zones, checkpoints, fields and tables")
+    abstain_reason = check_abstain_reason(plan.get("abstain_reason"), plan["intent"] == "abstain", RouteError)
+    if plan["intent"] == "abstain":
+        return LookupRoute(True, "the model abstained", [], [], [], [], [], attempt, abstain_reason)
+    if set(plan) != {"intent", "abstain_reason", "runs", "zones", "checkpoints", "fields", "tables"}:
+        raise RouteError(
+            "an answer has exactly the keys intent, abstain_reason, runs, zones, checkpoints, fields and tables"
+        )
 
     run_ids, reason = resolve_runs(plan["runs"], records)
     if reason is None:

@@ -29,6 +29,9 @@
     <tr><th>Question</th><td>{{ question }}</td></tr>
     <tr><th>Answered</th><td>{{ generated_at }}</td></tr>
     <tr><th>Status</th><td><span class="badge badge-small badge-{{ status_style }}">{{ status }}</span></td></tr>
+    {% if intent %}
+    <tr><th>Intent</th><td>{{ intent }}</td></tr>
+    {% endif %}
     <tr><th>Runs consulted</th><td>{{ runs | length }}</td></tr>
   </table>
 

@@ -65,8 +65,11 @@ HOW TO READ THE TABLES
   verdict (PASS, FAIL or WARN); the two are independent. missed_reason is set
   when it was MISSED. observed, expected_text and notes are as recorded. A
   checkpoint visited twice has two rows.
-- rec_findings: one row per finding. A finding with status 'abstained' is one
-  the detector would not call: it needs human review.
+- rec_findings: one row per finding. status is as recorded: logged,
+  acknowledged, needs_review or abstained. needs_review means nobody has
+  looked at it yet; abstained means the detector would not call it. They are
+  not the same: findings that need review are status = 'needs_review', and
+  findings the detector could not call are status = 'abstained'.
 - rec_sensor_alerts: threshold breaches logged during the run. The nearest
   checkpoint is where the robot was closest, not where the cause is.
 - rec_events: the run's own log, in order.
@@ -123,11 +126,11 @@ What happened at one checkpoint:
   FROM rec_checkpoints c JOIN runs r ON r.run_id = c.run_id
   WHERE c.run_id IN (<run_ids>) AND c.checkpoint_id IN ('<checkpoint>')
   ORDER BY r.run_order, c.position
-Which findings need human review:
+Which findings need review:
   SELECT r.run_id, f.finding_id, f.checkpoint_id, f.feature, f.description,
          f.path AS path_f, r.path AS path_r
   FROM rec_findings f JOIN runs r ON r.run_id = f.run_id
-  WHERE f.run_id IN (<run_ids>) AND f.status = 'abstained'
+  WHERE f.run_id IN (<run_ids>) AND f.status = 'needs_review'
   ORDER BY r.run_order, f.position
 The temperature reading at one checkpoint, or why there is none:
   SELECT r.run_id, c.checkpoint_id, g.value, x.reason,

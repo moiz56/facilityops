@@ -1,19 +1,32 @@
-"""Try semantic-router on three intents: lookup, derivation and abstain.
+"""The first-step router: lookup, derivation or abstain, tried with semantic-router.
 
 Standalone: imports nothing from the project. Run it from the project root:
 
-    python src/router/try_router.py                  # test table before and after fit, then save
-    python src/router/try_router.py "your question"  # load the saved router, route one question
+    python src/router/first_step_router.py                  # test table before and after fit, then save
+    python src/router/first_step_router.py "your question"  # load the saved router, route one question
 
-The saved router (calibrated_router.yaml, beside this file) holds the routes,
-the encoder name, the threshold and the fitted calibration. Change ROUTES or
-CALIBRATION and it is out of date: run without a question again to refit.
+The saved router (first_step_router.yaml, beside this file) holds the routes,
+the encoder name, the threshold and the fitted calibration. Change the
+question sets, their labels or the hand-written lists and it is out of date:
+run without a question again to refit.
 
   lookup     a value exactly as recorded, for a named checkpoint, zone or run
   derivation a figure worked out over the runs: a count, share, average, ranking
   abstain    a question the records cannot answer: why, what next, better or worse
 
 A question below THRESHOLD gets no route, which is treated as abstain too.
+
+The routes are trained on the question sets (config/b1_question_set.yaml and
+config/b1_question_set_extension.yaml), labelled in question_set_labels.yaml
+(router.label_question_set). Each question is split, so that its wordings are
+never shared between the three sets:
+  the question and its first 2 paraphrases   route utterances
+  the next paraphrase                        calibration
+  the rest                                   tests
+A catalogue question ("what can I ask") has no route here and is left out.
+The hand-written ROUTES, CALIBRATION and TESTS below are used only for a route
+the question sets give no question to, and for their off-topic (None)
+questions, which teach the calibration what a low score looks like.
 
 The utterances name no real checkpoint or zone: they say <checkpoint-id> and
 <zone-id>. Every question goes through normalise() first, which swaps a name
@@ -25,21 +38,29 @@ for the same placeholder, so "was a3_back completed" is matched as
 Names like home or ac_1 are both a zone and a checkpoint, so they are left as typed.
 
 Three sets of questions, kept apart on purpose:
-  ROUTES       the utterances the router matches against
-  CALIBRATION  labelled questions fit() uses to turn scores into probabilities
-  TESTS        the questions the router is checked on, seen by neither
+  routes       the utterances the router matches against
+  calibration  labelled questions fit() uses to turn scores into probabilities
+  tests        the questions the router is checked on, seen by neither
 """
 
 import re
 import sys
 from pathlib import Path
 
+import yaml
 from semantic_router import IndexedRouter, Route, load_router
 from semantic_router.encoders import FastEmbedEncoder
 
 ENCODER = "BAAI/bge-small-en-v1.5"   # local model, no API key
 THRESHOLD = 0.6                      # below this the question gets no route
-ROUTER_FILE = Path(__file__).resolve().parent / "calibrated_router.yaml"
+HERE = Path(__file__).resolve().parent
+ROUTER_FILE = HERE / "first_step_router.yaml"
+
+CONFIG = HERE.parents[1] / "config"
+QUESTION_SETS = (CONFIG / "b1_question_set.yaml", CONFIG / "b1_question_set_extension.yaml")
+LABELS_FILE = HERE / "question_set_labels.yaml"
+ROUTE_EXAMPLES = 3         # the question and its first 2 paraphrases
+CALIBRATION_EXAMPLES = 1   # the paraphrase after those; the rest are tests
 
 # checkpoint_4, checkpoint 4, cp4, cp 4, a3_back, c5_front, ups_front
 CHECKPOINT = re.compile(
@@ -53,6 +74,69 @@ def normalise(question: str) -> str:
     """The question with each checkpoint and zone name swapped for its placeholder."""
     return ZONE.sub("<zone-id>", CHECKPOINT.sub("<checkpoint-id>", question))
 
+
+def split_question_set() -> list[dict]:
+    """Each labelled question in the question sets, split three ways.
+
+    {id, first_step, second_step, routes, calibration, tests}, in file order;
+    catalogue questions are left out. Exits when the labels file is missing or
+    a question has no label.
+    """
+    if not LABELS_FILE.exists():
+        sys.exit(f"{LABELS_FILE} not found: run PYTHONPATH=src python -m router.label_question_set first")
+    labels = {row["id"]: row for row in yaml.safe_load(LABELS_FILE.read_text(encoding="utf-8"))["labels"]}
+    split = []
+    for path in QUESTION_SETS:
+        for entry in yaml.safe_load(path.read_text(encoding="utf-8"))["questions"]:
+            qid = str(entry["id"]).split()[0]   # some ids carry a note, e.g. "Q21 (ALREADY IMPLEMENTED)"
+            if qid not in labels:
+                sys.exit(f"{qid} has no label in {LABELS_FILE.name}: delete it and label again")
+            label = labels[qid]
+            if label["first_step"] == "catalogue":
+                continue
+            texts = [entry["question"].strip()] + [p.strip() for p in entry.get("paraphrases") or []]
+            calibration_end = ROUTE_EXAMPLES + CALIBRATION_EXAMPLES
+            split.append({
+                "id": qid, "first_step": label["first_step"], "second_step": label["second_step"],
+                "routes": texts[:ROUTE_EXAMPLES], "calibration": texts[ROUTE_EXAMPLES:calibration_end],
+                "tests": texts[calibration_end:],
+            })
+    return split
+
+
+def build_sets(
+    labelled: list[tuple[str, list[str], list[str], list[str]]], hand_routes: dict[str, list[str]],
+    hand_calibration: list[tuple[str, str | None]], hand_tests: list[tuple[str, str | None]],
+) -> tuple[dict[str, list[str]], list[tuple[str, str | None]], list[tuple[str, str | None]], list[str]]:
+    """Routes, calibration and tests from labelled questions: (route, routes, calibration, tests) each.
+
+    Every route in hand_routes is kept. One the labelled questions give
+    nothing to keeps its hand-written utterances, calibration and tests; its
+    name is in the list returned last. The hand-written off-topic (None)
+    questions are always added.
+    """
+    routes: dict[str, list[str]] = {name: [] for name in hand_routes}
+    calibration: list[tuple[str, str | None]] = []
+    tests: list[tuple[str, str | None]] = []
+    for route, examples, calibrating, testing in labelled:
+        if route not in routes:
+            sys.exit(f"{LABELS_FILE.name}: '{route}' is not a route; the routes are {', '.join(routes)}")
+        # Utterances are matched in their normalised form, so they are stored that way.
+        routes[route] += [normalise(text) for text in examples]
+        calibration += [(text, route) for text in calibrating]
+        tests += [(text, route) for text in testing]
+
+    hand_written = [name for name, utterances in routes.items() if not utterances]
+    for name in hand_written:
+        routes[name] = hand_routes[name]
+        calibration += [(q, label) for q, label in hand_calibration if label == name]
+        tests += [(q, label) for q, label in hand_tests if label == name]
+    calibration += [(q, label) for q, label in hand_calibration if label is None]
+    tests += [(q, label) for q, label in hand_tests if label is None]
+    return routes, calibration, tests, hand_written
+
+
+# Hand-written: used only for a route the question sets give nothing to.
 ROUTES = {
     # A value as recorded: one checkpoint, zone or run, read straight off the record.
     "lookup": [
@@ -157,8 +241,9 @@ ROUTES = {
     ],
 }
 
-# Labelled questions fit() learns from. None means no route should match:
-# off-topic questions, so the fitted curve learns what a low score looks like.
+# Hand-written labelled questions fit() learns from, used for a hand-written
+# route and for the off-topic ones: None means no route should match, so the
+# fitted curve learns what a low score looks like.
 CALIBRATION = [
     ("what did checkpoint_6 record for pressure", "lookup"),
     ("did b2_front get visited on the latest run", "lookup"),
@@ -206,8 +291,8 @@ CALIBRATION = [
     ("what's 17 times 23", None),
 ]
 
-# Questions about the sis_racks route, using its real checkpoint and zone
-# names and dates it has runs on.
+# Hand-written tests on sis_racks names, used for a hand-written route and for
+# the off-topic (None) ones.
 TESTS = [
     ("what readings were taken at c5_front on 30 july", "lookup"),
     ("what was a3_back's verdict last run", "lookup"),
@@ -247,16 +332,18 @@ TESTS = [
 ]
 
 
-def build_router() -> IndexedRouter:
-    routes = [Route(name=name, utterances=utterances) for name, utterances in ROUTES.items()]
-    return IndexedRouter(encoder=FastEmbedEncoder(name=ENCODER), routes=routes)
+def build_router(routes: dict[str, list[str]]) -> IndexedRouter:
+    return IndexedRouter(
+        encoder=FastEmbedEncoder(name=ENCODER),
+        routes=[Route(name=name, utterances=utterances) for name, utterances in routes.items()],
+    )
 
 
-def run_tests(router: IndexedRouter, title: str) -> None:
+def run_tests(router: IndexedRouter, tests: list[tuple[str, str | None]], title: str) -> None:
     print(f"\n{title}")
     print(f"{'question':<48} {'expected':<10} {'got':<10} {'conf':>5}  ok")
     passed = 0
-    for question, expected in TESTS:
+    for question, expected in tests:
         choice = router(normalise(question))
         got = choice.name
         # no route and the abstain route both mean the records cannot answer it
@@ -264,12 +351,12 @@ def run_tests(router: IndexedRouter, title: str) -> None:
         passed += ok
         confidence = f"{choice.confidence:.2f}" if choice.confidence is not None else "-"
         print(f"{question[:47]:<48} {str(expected):<10} {str(got):<10} {confidence:>5}  {'yes' if ok else 'NO'}")
-    print(f"{passed} of {len(TESTS)} passed")
+    print(f"{passed} of {len(tests)} passed")
 
 
-def calibrate(router: IndexedRouter) -> None:
-    questions = [normalise(question) for question, _ in CALIBRATION]
-    labels = [label for _, label in CALIBRATION]
+def calibrate(router: IndexedRouter, calibration: list[tuple[str, str | None]]) -> None:
+    questions = [normalise(question) for question, _ in calibration]
+    labels = [label for _, label in calibration]
     report = router.fit(X=questions, y=labels)
     print(f"fit: {report.n} questions, accuracy {report.accuracy:.2f}, calibration error {report.ece:.2f}")
     router.confidence_threshold = THRESHOLD
@@ -288,17 +375,30 @@ def main() -> None:
         confidence = f"{choice.confidence:.2f}" if choice.confidence is not None else "-"
         print(f"{question}\n  routed as: {routed}\n  route: {choice.name}  confidence: {confidence}  "
               f"(threshold {router.confidence_threshold})")
+        # Every route, best first, whatever its confidence. Each is the fitted
+        # curve applied to that route's own score, so they need not add up to 1.
+        print("  every route:")
+        for each in router(routed, limit=None, threshold=float("-inf")):
+            print(f"    {each.name:<12} {each.confidence:.2f}")
         return
 
-    router = build_router()
+    split = split_question_set()
+    routes, calibration, tests, hand_written = build_sets(
+        [(q["first_step"], q["routes"], q["calibration"], q["tests"]) for q in split], ROUTES, CALIBRATION, TESTS,
+    )
+    print(f"{len(split)} questions: " + ", ".join(f"{name} {len(u)} utterances" for name, u in routes.items())
+          + f"; {len(calibration)} calibration, {len(tests)} tests")
+    if hand_written:
+        print(f"hand-written, as the question sets give them nothing: {', '.join(hand_written)}")
+    router = build_router(routes)
 
     # Before fit: confidence is the raw similarity, and with no threshold the
     # best match always wins, so None never comes back.
-    run_tests(router, "before fit (raw scores, no threshold)")
+    run_tests(router, tests, "before fit (raw scores, no threshold)")
 
     print()
-    calibrate(router)
-    run_tests(router, f"after fit (probabilities, threshold {THRESHOLD})")
+    calibrate(router, calibration)
+    run_tests(router, tests, f"after fit (probabilities, threshold {THRESHOLD})")
 
     router.to_yaml(ROUTER_FILE)
     print(f"\ncalibrated router saved to {ROUTER_FILE}")

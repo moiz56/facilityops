@@ -1,0 +1,196 @@
+router_type: indexed
+encoder:
+  type: fastembed
+  name: BAAI/bge-small-en-v1.5
+sparse_encoder: null
+alpha: 0.7
+top_k: 5
+aggregation: mean
+index:
+  type: local
+confidence_threshold: 0.6
+calibrator:
+  method: platt
+  params:
+    a:
+    - 9.604074998802698
+    b:
+    - -6.995840239603564
+refresh_interval: null
+routes:
+- name: threshold_compare
+  utterances:
+  - How many checkpoints exceeded the temperature threshold on the most recent run?
+  - how many ran hot
+  - checkpoints over the temp limit
+  description: null
+  confidence_threshold: null
+  metadata: {}
+- name: condition_count
+  utterances:
+  - How many findings were recorded on the most recent run, by status?
+  - findings breakdown last run
+  - how many findings and what state are they in
+  - Have any checkpoints been missed on the first run?
+  - recurring misses
+  - checkpoints we keep missing
+  - Are there any findings marked abstained along with where?
+  - anything needing review
+  - abstained findings
+  - How many checkpoints failed on the most recent run?
+  - how many failures last run
+  - count the fails
+  - How many sensor alerts were logged, by severity?
+  - alert breakdown
+  - how many critical alerts
+  - How many findings were recorded, by feature?
+  - findings grouped by type
+  - what kinds of issues came up
+  - Which checkpoints captured no evidence?
+  - where are we missing photos
+  - checkpoints with no images
+  - Do the declared counts match the checkpoints in the record?
+  - does the record add up
+  - any count mismatches
+  - Which findings have no configured action?
+  - anything we don't know how to handle
+  - unmapped findings
+  description: null
+  confidence_threshold: null
+  metadata: {}
+- name: proportion
+  utterances:
+  - What proportion of checkpoints on the most recent run completed?
+  - how much of the route did we finish
+  - completion rate last run
+  - What proportion of referenced images resolved?
+  - how many photos actually exist
+  - image resolution rate
+  description: null
+  confidence_threshold: null
+  metadata: {}
+- name: group_mean
+  utterances:
+  - Which zone had the highest average vibration?
+  - noisiest zone on average
+  - which area averages the most vibration
+  - Which zone had the highest average temperature?
+  - hottest zone on average
+  - which area runs warmest
+  description: null
+  confidence_threshold: null
+  metadata: {}
+- name: group_max
+  utterances:
+  - Which checkpoint recorded the highest vibration in the most recent run?
+  - highest vibration last run
+  - where was vibration worst
+  - Which checkpoint recorded the highest temperature?
+  - hottest checkpoint
+  - where was it warmest
+  description: null
+  confidence_threshold: null
+  metadata: {}
+- name: rank_top_n
+  utterances:
+  - List the five highest vibration readings on the most recent run.
+  - top 5 vibration
+  - worst five vibration readings
+  description: null
+  confidence_threshold: null
+  metadata: {}
+- name: run_set_difference
+  utterances:
+  - What is different between the two most recent runs?
+  - what changed since last time
+  - diff the last two runs
+  - Which checkpoints failed on both of the last two runs?
+  - repeat failures
+  - what failed twice in a row
+  - Which checkpoints appear in the most recent run but not the previous one?
+  - new checkpoints this run
+  - what's in this run that wasn't in the last
+  - Which findings are new since the previous run?
+  - new issues this time
+  - what's come up since last run
+  - Which findings appear in both of the last two runs?
+  - recurring findings
+  - what keeps showing up
+  - How did coverage change between the last two runs?
+  - coverage difference between runs
+  - did we capture more or less this time
+  - Which sensor blocks were available last run but not this one?
+  - did any sensors drop out
+  - sensors working last time but not now
+  description: null
+  confidence_threshold: null
+  metadata: {}
+- name: run_date_range
+  utterances:
+  - How many runs have been recorded, over what period?
+  - how many inspections do we have
+  - what date range does the data cover
+  - When was this route last run?
+  - last inspection date
+  - when did we last do this route
+  description: null
+  confidence_threshold: null
+  metadata: {}
+- name: sensor_alert_count
+  utterances:
+  - how many sensor alerts were there on the last run
+  - alerts by severity please
+  - how many critical alerts fired
+  - count the warnings and criticals for each run
+  - which run had the most alerts
+  - were there any critical sensor alerts this week
+  - how many alerts did the robot raise
+  - breakdown of sensor warnings per run
+  - did any run have zero alerts
+  - how many warning level alerts are there
+  description: null
+  confidence_threshold: null
+  metadata: {}
+- name: evidence_count
+  utterances:
+  - What thermal coverage exists on the most recent run?
+  - do we have thermal everywhere
+  - thermal image coverage
+  description: null
+  confidence_threshold: null
+  metadata: {}
+- name: count_check
+  utterances:
+  - do the run's declared counts match the checkpoint list
+  - does the passed count add up
+  - is the robot's finding count right
+  - check the counts on the latest run
+  - do the totals the robot reported match what's in the record
+  - are the completed checkpoint numbers consistent
+  - does each event's evidence count match the visit
+  - any mismatches between the declared and actual counts
+  - is the missed count correct for this run
+  - do the summary numbers on the run agree with the details
+  description: null
+  confidence_threshold: null
+  metadata: {}
+- name: records
+  utterances:
+  - What checkpoint was missed on the most recent run and why?
+  - what didn't we get to
+  - missed checkpoints and reasons
+  - Which sensor blocks were unavailable on the most recent run and why?
+  - any sensors down
+  - which sensor readings can't we trust
+  - What operator notes are recorded against <checkpoint-id>?
+  - any notes on <checkpoint-id>
+  - what did the operator write for <checkpoint-id>
+  - What findings are recorded at <checkpoint-id>?
+  - findings at <checkpoint-id>
+  - what's flagged at <checkpoint-id>
+  - What is the overall result of the most recent run?
+  - how did the last run go
+  - did it pass
+  description: null
+  confidence_threshold: null
+  metadata: {}

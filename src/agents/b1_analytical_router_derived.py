@@ -35,6 +35,21 @@ RECORDS = "records"
 # The derivation types the router offers: every type with a SQL writer prompt.
 ROUTED_TYPES = tuple(kind for kind in PROMPTS if kind != RECORDS)
 
+# Why a router abstained, when the model abstains. Shared with the retrieval
+# and lookup routers. The reply's abstain_reason is one of these, or null
+# when it does not abstain.
+ABSTAIN_REASONS = ("causation", "prediction", "determination", "not_captured")
+ABSTAIN_REASON_SCHEMA = {"anyOf": [{"type": "string", "enum": list(ABSTAIN_REASONS)}, {"type": "null"}]}
+
+
+def check_abstain_reason(value, abstaining: bool, error: type[ValueError]) -> str | None:
+    """value, when it is one of ABSTAIN_REASONS while abstaining, or null otherwise. Raises error."""
+    if abstaining and value not in ABSTAIN_REASONS:
+        raise error(f"an abstain gives abstain_reason, one of: {', '.join(ABSTAIN_REASONS)}")
+    if not abstaining and value is not None:
+        raise error("abstain_reason is null unless the reply abstains")
+    return value
+
 # How the reply names runs, zones and checkpoints. Shared with the lookup
 # router (b1_analytical_router_lookup), so both read them the same way; code
 # checks them with resolve_runs and check_places.
@@ -158,8 +173,12 @@ itself.
   maximum and a ranking can both give the single highest reading;
   name the one whose reading and source (samples or checkpoints) the question
   matches.
-- A difference compares two runs only: the latest and the one before it. It
-  compares three things, nothing else:
+- A difference compares two runs only: the latest and the one before it.
+  Name it only when the question clearly compares two runs: "since the last
+  run", "between the last two runs", "the latest against the one before",
+  "new since the previous run". A question about one run, even the latest,
+  never names it, even when it uses words like "different", "changed" or
+  "new". It compares three things, nothing else:
     - checkpoints: the ids only the earlier run's record lists, only the
       latest's lists, and both list
     - findings: which only the earlier run recorded, which only the latest
@@ -246,8 +265,8 @@ Days the runs started on:
 
 HOW TO REPLY
 Reply with JSON only, one of:
-  {"intent": "answer", "runs": ..., "zones": [...], "checkpoints": [...], "derivations": [...]}
-  {"intent": "abstain", "runs": "all", "zones": [], "checkpoints": [], "derivations": []}
+  {"intent": "answer", "abstain_reason": null, "runs": ..., "zones": [...], "checkpoints": [...], "derivations": [...]}
+  {"intent": "abstain", "abstain_reason": "<one of the four below>", "runs": "all", "zones": [], "checkpoints": [], "derivations": []}
 
 {places}
 derivations: the names, from the list above, of the figures the question
@@ -256,9 +275,13 @@ derivations: the names, from the list above, of the figures the question
   temperature in each zone" names a maximum and a mean).
 
 WHEN TO ABSTAIN
-Abstain if no figure above and not the records answer the question:
--the model should abstain on how/why questions like "Why did the temperature reduce/peak" or
- "Who is the manufacturer of the robot". Basically questions which the data will not contain.
+Abstain when no figure above, and no record, answers the question. Give
+abstain_reason, one of:
+  causation      it asks why something happened: "why did the temperature peak"
+  prediction     it asks what will happen: "will c4_back fail next run"
+  determination  it asks for a judgement: "is this reading normal"
+  not_captured   nothing here holds it: "who makes the robot", "what did it cost"
+An answer gives abstain_reason null.
 
 {feedback}QUESTION
 {question}
@@ -281,6 +304,8 @@ class Route:
     derivations: the derivation instance names the question needs
     attempts:    model calls made
     zones:       the zones named; [] means no zone filter
+    abstain_reason: one of ABSTAIN_REASONS when the model abstained; None
+                 otherwise, and when code abstained over a name
     """
 
     abstain: bool
@@ -290,6 +315,7 @@ class Route:
     derivations: list[str]
     attempts: int
     zones: list[str] = field(default_factory=list)
+    abstain_reason: str | None = None
 
 
 def route_question(
@@ -330,6 +356,7 @@ def reply_schema(derivation: DerivationConfig) -> dict:
         "type": "object",
         "properties": {
             "intent": {"type": "string", "enum": ["answer", "abstain"]},
+            "abstain_reason": ABSTAIN_REASON_SCHEMA,
             "runs": {"anyOf": [
                 {"type": "string", "enum": ["all"]},
                 {"type": "array", "items": {"anyOf": [{"type": "integer"}, {"type": "string"}]}},
@@ -338,7 +365,7 @@ def reply_schema(derivation: DerivationConfig) -> dict:
             "checkpoints": {"type": "array", "items": {"type": "string"}},
             "derivations": {"type": "array", "items": {"type": "string", "enum": [*offered(derivation), RECORDS]}},
         },
-        "required": ["intent", "runs", "zones", "checkpoints", "derivations"],
+        "required": ["intent", "abstain_reason", "runs", "zones", "checkpoints", "derivations"],
         "additionalProperties": False,
     }
 
@@ -382,7 +409,8 @@ def describe(name: str, derivation: DerivationConfig) -> str:
                 f"latest run, which only the earlier run had, and which both had; and for each sensor block, "
                 f"the checkpoints where it was available only in the earlier run (dropped out), only in the "
                 f"latest, and in both, and why it was not. Checkpoints, findings and sensor blocks only: no "
-                f"other comparison between runs")
+                f"other comparison between runs. Only for a question that clearly compares two runs; never "
+                f"for a question about one run")
     if entry["type"] == "run_date_range":
         return (f"- {name}: date range. Across all runs: the earliest and latest start time and which runs "
                 f"they were, the days between them, how many runs, and how many days had a run and how many "
@@ -413,8 +441,10 @@ def describe(name: str, derivation: DerivationConfig) -> str:
     if entry["type"] == "condition_count" and "by_value" in entry:
         items = entry["scope"].replace("_", " ")
         expected = ", ".join(entry.get("expected") or [])
+        listed = f"{expected}, each listed even at 0, and any other value found" if expected else \
+            "every value found, as recorded"
         return (f"- {name}: count by value. In each run, how many {items} have each value of "
-                f"{entry['by_value']} ({expected}, each listed even at 0, and any other value found), out of "
+                f"{entry['by_value']} ({listed}), out of "
                 f"how many {items}, and which were left out and why. For \"how many {items} by "
                 f"{entry['by_value']}\", a breakdown, or how many have one {entry['by_value']}")
     if entry["type"] in ("condition_count", "proportion"):
@@ -457,12 +487,15 @@ def parse_reply(reply: str, records: Sequence[Record], derivation: DerivationCon
         raise RouteError("the reply was not valid JSON") from None
     if not isinstance(plan, dict):
         raise RouteError("the reply must be one JSON object")
-    if plan.get("intent") == "abstain":
-        return Route(True, "the model abstained", [], [], [], attempt)
-    if plan.get("intent") != "answer":
+    if plan.get("intent") not in ("answer", "abstain"):
         raise RouteError('intent must be "answer" or "abstain"')
-    if set(plan) != {"intent", "runs", "zones", "checkpoints", "derivations"}:
-        raise RouteError("an answer has exactly the keys intent, runs, zones, checkpoints and derivations")
+    abstain_reason = check_abstain_reason(plan.get("abstain_reason"), plan["intent"] == "abstain", RouteError)
+    if plan["intent"] == "abstain":
+        return Route(True, "the model abstained", [], [], [], attempt, abstain_reason=abstain_reason)
+    if set(plan) != {"intent", "abstain_reason", "runs", "zones", "checkpoints", "derivations"}:
+        raise RouteError(
+            "an answer has exactly the keys intent, abstain_reason, runs, zones, checkpoints and derivations"
+        )
 
     run_ids, reason = resolve_runs(plan["runs"], records)
     if reason is None:

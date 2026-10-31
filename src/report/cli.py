@@ -35,6 +35,7 @@ from common.paths import (
 from common.provenance import stamp
 from common.readability import CouldNotRead, could_not_read
 from common.schema import Record
+from common.signoff import RowSignOff, facility_rows, settings, sign_off
 from report.derive import DerivedValues, derive_report_values
 from report.gaps import RUN_LEVEL, Gap, detect_gaps
 from report.images import ViewCell, build_view_grid
@@ -49,8 +50,7 @@ logger = logging.getLogger("report.cli")
 #: B-2 has its own derivation set; config/derivations.yaml is B-1's.
 DERIVATIONS_CONFIG = PROJECT_ROOT / "config" / "b2_derivations.yaml"
 AGENTS_CONFIG = PROJECT_ROOT / "config" / "agents.yaml"
-ACTION_MAPPING_CONFIG = PROJECT_ROOT / "config" / "action_mapping.yaml"   # B-3's, when sections.action_plan is on
-ENV_FILE = PROJECT_ROOT / ".env"   # the provider's API key
+ACTION_MAPPING_CONFIG = PROJECT_ROOT / "config" / "action_mapping.yaml"   # B-3's, when sections.action_plan is onENV_FILE = PROJECT_ROOT / ".env"   # the provider's API key
 
 @dataclass(frozen=True)
 class Artifacts:
@@ -61,6 +61,7 @@ class Artifacts:
     grids: dict[str, list[ViewCell]]
     gaps: list[Gap]
     could_not_read: list[CouldNotRead]
+    row_signoff: list[RowSignOff]
     derived: DerivedValues
     pdf_path: Path
     manifest: dict
@@ -104,6 +105,11 @@ def run_pipeline(
     # same way gaps are, so the PDF and the manifest hold the same entries.
     unreadable = could_not_read(record, config)
 
+    # row sign-off. Built from the same images and could_not_read entries the
+    # report prints, stamped with the report's own time, and passed to both
+    # render and manifest.
+    signoffs = row_signoff(record, config, images, unreadable, provenance.generated_at)
+
     # executive summary, only when config asks for it: B-2 writes it from this
     # run alone, and render puts it straight after the cover.
     summary = executive_summary(record, config) if config["sections"].get("executive_summary") else None
@@ -117,19 +123,36 @@ def run_pipeline(
     # can know them (4.4).
     pdf_path, pages = render_document(
         record, gaps, derived, grids, config, output_dir, provenance, summary, intros, notes,
-        statement, actions, unreadable,
+        statement, actions, unreadable, signoffs,
     )
 
     # manifest. The same config path the render used, so the version stamp and
     # the config hash describe the config that was actually applied (4.4).
     manifest = build_manifest(
         record, gaps, images, pdf_path, config_path, provenance, pages, config, unreadable,
+        signoffs,
     )
 
     return Artifacts(
         record=record, images=images, grids=grids, gaps=gaps, could_not_read=unreadable,
-        derived=derived, pdf_path=pdf_path, manifest=manifest,
+        row_signoff=signoffs, derived=derived, pdf_path=pdf_path, manifest=manifest,
     )
+
+
+def row_signoff(
+    record: Record, config: dict, images: dict[str, list[ResolvedImage]],
+    unreadable: list[CouldNotRead], signed_off_at: str,
+) -> list[RowSignOff]:
+    """Each row's sign-off for this run, or empty when the facility has no rows file.
+
+    The signoff block is checked first, so a bad one fails every run, not only
+    the runs of a facility that has rows.
+    """
+    rules = settings(config, PROJECT_ROOT)
+    rows = facility_rows(rules.rows_dir, record.facility_id)
+    if rows is None:
+        return []
+    return sign_off(record, rows, rules, images, unreadable, signed_off_at)
 
 
 def executive_summary(record: Record, config: dict) -> str | None:

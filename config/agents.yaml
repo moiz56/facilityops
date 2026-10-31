@@ -22,7 +22,7 @@ agents:
     prompt_version: b1_answer_v2
     max_attempts: 3              # model calls per question, first try included
     max_question_chars: 500        # a longer question is refused, never cut short
-    pdf: false                    # true: --ask also writes the answer as a PDF to b1_answers
+    pdf: true                    # true: --ask also writes the answer as a PDF to b1_answers
   b2_narrative:
     enabled: true
     prose: true                    # false: the summary keeps code's paragraph order, no model call

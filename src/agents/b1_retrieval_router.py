@@ -22,7 +22,7 @@ import logging
 import re
 from dataclasses import dataclass, fields
 
-from agents.b1_analytical_router_derived import describe, offered
+from agents.b1_analytical_router_derived import ABSTAIN_REASON_SCHEMA, check_abstain_reason, describe, offered
 from agents.provider import Provider
 from agents.schema import B1Config, DerivationConfig
 from agents.utils import SENSOR_BLOCKS, fill_prompt
@@ -35,9 +35,10 @@ REPLY_SCHEMA = {
     "type": "object",
     "properties": {
         "retrieval": {"type": "string", "enum": list(RETRIEVALS)},
+        "abstain_reason": ABSTAIN_REASON_SCHEMA,
         "reason": {"type": "string"},
     },
-    "required": ["retrieval", "reason"],
+    "required": ["retrieval", "abstain_reason", "reason"],
     "additionalProperties": False,
 }
 
@@ -80,6 +81,10 @@ that lookup does not hold. These are held:
   ranking, above or below a limit, a difference between runs, when runs were
   taken. Choose it even when none of the above looks like a fit: the next
   step checks that, and says so when none holds it.
+  A difference between runs is only for a question that clearly compares
+  two runs: "what changed since the last run", "the latest run against the
+  one before", "which findings are new since the previous run". A question
+  about one run, even the latest, is never a difference between runs.
   Choose it too for the records lookup does not hold, even though they are
   recorded values, not figures: findings and their recommended actions,
   sensor alerts, the event log, the run's own details, why a checkpoint was
@@ -101,6 +106,8 @@ checkpoints, with nothing combined or worked out:
     <checkpoint>", "the thermal images at <checkpoint>"
   Choose lookup when the question asks for recorded values of the items it
   names, even when a derivation happens to carry that value too.
+  A question about one run's values is not a comparison of runs, even when
+  it says "the latest run" or "the last run".
 
 catalogue: the question asks what can be asked, not about the records
 themselves: "what questions can I ask", "help", "what can you tell me",
@@ -108,12 +115,29 @@ themselves: "what questions can I ask", "help", "what can you tell me",
   A question that names a checkpoint, zone or run and asks what happened
   there is about the records: derivation or lookup, not catalogue.
 
-abstain: none of the above can answer it:
-  - why something happened, what will happen, or advice of your own on what
-    should be done (a recommended action the records hold is a recorded
-    detail: derivation)
-  - a judgement: better, worse, safe, normal, acceptable
-  - anything the records do not hold: costs, maintenance, people, other sites
+abstain: none of the above can answer it. Say which of these four it is, as
+abstain_reason:
+  causation      why something happened, or what caused it
+  prediction     what will happen, or when; advice of your own on what should
+                 be done (a recommended action the records hold is a recorded
+                 detail: derivation)
+  determination  a judgement: safe, compliant, normal, acceptable, better, worse
+  not_captured   something the records do not hold: makers, models, costs,
+                 maintenance, people, the age of the route, other sites
+  Examples:
+    "What made the temperature at c2_front spike?"       abstain, causation
+    "Why does checkpoint_3 keep vibrating so much?"      abstain, causation
+    "Will humidity in rowB_front keep rising?"           abstain, prediction
+    "Which sensor is going to fail first?"               abstain, prediction
+    "Is the air quality at a3_back acceptable?"          abstain, determination
+    "Did the latest run go better than the one before?"  abstain, determination
+    "What did this inspection cost?"                     abstain, not_captured
+    "Which technician serviced the robot?"               abstain, not_captured
+  These look close but are NOT abstain:
+    "Why was checkpoint_3 missed?"                       derivation (the missed reason is recorded)
+    "What changed at checkpoint_5 since the last run?"   derivation (a difference, no cause)
+    "How many runs are recorded, and over what period?"  derivation (the span of runs, not the route's age)
+    "What action is recommended at checkpoint_4?"        derivation (a recorded action, not advice)
 
 RULES
 - Decide from what the question asks for, not from its wording.
@@ -148,7 +172,10 @@ RULES
 
 REPLY
 JSON only:
-  {"retrieval": "derivation" | "lookup" | "catalogue" | "abstain", "reason": "<one short sentence>"}
+  {"retrieval": "derivation" | "lookup" | "catalogue" | "abstain",
+   "abstain_reason": "causation" | "prediction" | "determination" | "not_captured" | null,
+   "reason": "<one short sentence>"}
+abstain_reason is null unless retrieval is abstain.
 
 {feedback}QUESTION
 {question}
@@ -166,11 +193,13 @@ class Retrieval:
     kind:     derivation, lookup, catalogue or abstain
     reason:   the model's one sentence on why
     attempts: model calls made
+    abstain_reason: one of ABSTAIN_REASONS when kind is abstain, else None
     """
 
     kind: str
     reason: str
     attempts: int
+    abstain_reason: str | None = None
 
 
 def classify_question(
@@ -221,10 +250,11 @@ def parse_reply(reply: str, attempt: int) -> Retrieval:
         plan = json.loads(text)
     except json.JSONDecodeError:
         raise RetrievalError("the reply was not valid JSON") from None
-    if not isinstance(plan, dict) or set(plan) != {"retrieval", "reason"}:
-        raise RetrievalError("the reply is one JSON object with exactly the keys retrieval and reason")
+    if not isinstance(plan, dict) or set(plan) != {"retrieval", "abstain_reason", "reason"}:
+        raise RetrievalError("the reply is one JSON object with exactly the keys retrieval, abstain_reason and reason")
     if plan["retrieval"] not in RETRIEVALS:
         raise RetrievalError('retrieval must be "derivation", "lookup", "catalogue" or "abstain"')
+    abstain_reason = check_abstain_reason(plan["abstain_reason"], plan["retrieval"] == "abstain", RetrievalError)
     if not isinstance(plan["reason"], str) or not plan["reason"].strip():
         raise RetrievalError("reason must be one short sentence")
-    return Retrieval(plan["retrieval"], plan["reason"].strip(), attempt)
+    return Retrieval(plan["retrieval"], plan["reason"].strip(), attempt, abstain_reason)

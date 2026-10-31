@@ -37,6 +37,7 @@ from common.readability import CouldNotRead
 from common.schema import (
     Checkpoint, Finding, Point2D, Pose, Record, SensorAlert, SensorBlock, SensorWarning,
 )
+from common.signoff import RowSignOff
 from report.derive import DerivedValues, ZoneStat
 from report.gaps import RUN_LEVEL, Gap, GapType, disagreeing_counts, offline_block_gaps
 from report.images import GRID_COLUMNS, ViewCell, prepare_image
@@ -95,6 +96,7 @@ RENDERED_BLOCKS = (
     ("coverage", "coverage", "Coverage and reconciliation"),
     ("coverage", "gaps", "All gaps"),
     ("coverage", "could-not-read", "Could not read"),
+    ("coverage", "row-signoff", "Row sign-off"),
     ("findings", "findings", "Findings"),
     ("alerts", "alerts", "Sensor alerts"),
     ("zone_telemetry", "zone-telemetry", "Zone telemetry"),
@@ -1661,6 +1663,7 @@ def render_html(
     coverage_statement: str | None = None,
     action_plan: dict | None = None,
     could_not_read: Sequence[CouldNotRead] = (),
+    row_signoff: Sequence[RowSignOff] = (),
 ) -> str:
     """Render the whole report to HTML.
 
@@ -1681,6 +1684,7 @@ def render_html(
     output body (actions, unmapped), its own section after the executive
     summary page, as tables; None leaves it out. `could_not_read` is the same
     list the manifest carries, printed as its own section after the gap list.
+    `row_signoff` is likewise the manifest's rows, printed after could_not_read.
     """
     rows = count_rows(derived, disagreeing_counts(record))
     evidence = evidence_rows(record, gaps)
@@ -1728,6 +1732,7 @@ def render_html(
         gap_rows=gap_rows(record, gaps),
         run_level=RUN_LEVEL,
         could_not_read=list(could_not_read),
+        row_signoff=list(row_signoff),
         missed=coverage_items(record, gaps, GapType.MISSED_CHECKPOINT),
         no_evidence=coverage_items(record, gaps, GapType.NO_EVIDENCE),
         verdict_style=verdict_style(record.final_status),
@@ -1800,6 +1805,7 @@ def render_document(
     coverage_statement: str | None = None,
     action_plan: dict | None = None,
     could_not_read: Sequence[CouldNotRead] = (),
+    row_signoff: Sequence[RowSignOff] = (),
 ) -> tuple[Path, PageMap]:
     """Render one run to a PDF, and report where each section landed in it.
 
@@ -1836,6 +1842,7 @@ def render_document(
             html = render_html(
                 record, gaps, derived, grids, config, Path(image_dir), rows, executive_summary,
                 section_intros, item_notes, coverage_statement, action_plan, could_not_read,
+                row_signoff,
             )
             document = HTML(string=html, base_url=str(TEMPLATE_DIR)).render(
                 stylesheets=stylesheets,
