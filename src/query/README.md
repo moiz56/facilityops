@@ -914,110 +914,346 @@ A facility with no file is not signed off.
 
 ## 12. How to word a question
 
+This section takes the place of `B1_PROMPT_GUIDELINES.txt`, which was removed
+in the last commit. It is brought up to date with Milestone 3: tenants, the
+new derivations and the catalogue.
+
+How to word a question so the agent can answer it, and what it can answer.
 The agent abstains when it cannot work out what is being asked. A specific
 question gets an answer. A vague one gets an abstention or is unroutable.
 
-### 12.1 Name three things
+Ask as a tenant:
+
+```bash
+PYTHONPATH=src python -m query.agreed_route --tenant <tenant_id> --ask "<question>"
+```
+
+### 12.1 The three parts of a good question
+
+Every question should name three things:
 
 1. **The run**: which run or runs it is about.
-2. **The figure**: what is being worked out or looked up.
-3. **The item**: checkpoint, zone, finding, sensor alert, image, or the run itself.
+2. **The figure**: the derivation or value being asked for.
+3. **The item**: what it looks over: checkpoint, zone, finding, sensor alert,
+   image, or the run itself.
 
-> "In the most recent run, which checkpoints went over the temperature threshold?"
+> "In the most recent run, which checkpoints had a temperature threshold that was exceeded?"
 >
-> run: "the most recent run" · figure: "over the temperature threshold" (D1) · item: "checkpoints"
+> run: "In the most recent run" · figure: "temperature threshold ... exceeded" → D1 · item: "checkpoints"
 
-Using the figure's own word works best: threshold, mean, average, peak, top
-five, percentage, by status, by severity. Loose wording is fine as long as it
-is not vague. "Went over the temperature limit" works. "Was it too hot" does
-not.
+Using the derivation's own word works best: threshold, mean, average, peak,
+top five, percentage, by status, by severity. Loose wording works too, as long
+as it is not vague. "Went over the temperature limit" is fine. "Was it too
+hot" is not.
 
 ### 12.2 Naming the run
 
 | You mean | Say |
 |---|---|
 | Every run | "across all runs", "in each run", or name no run |
-| First, second, ... | "the first run", "the first and third runs" |
-| Latest | "the latest run", "the most recent run" |
-| The one before | "the run before the latest", "the last two runs" |
-| One day | "the runs on 31 August", "on 19/8/2026" |
-| A span | "the runs from 14 to 21 August 2026", "the runs in August 2026" |
+| First run | "the first run", "the very first run" |
+| Second, third, ... | "the second run", "the first and third runs" |
+| Most recent run | "the latest run", "the most recent run" |
+| The one before it | "the run before the latest", "the last two runs" |
+| One day | "the runs on August 31st", "on 19/8/2026" |
+| A span of days | "the runs from 14 to 21 August 2026", "the runs in August 2026" |
 
 - Naming no run means every run. Say "the latest run" if that is what you mean.
-- A date means every run that started that day. There may be more than one.
+- "Every run" means every run in **your tenant's scope**, never anyone
+  else's. Use `--from`/`--to` or `--facility` to narrow the scope itself.
+- A date names every run that started that day. There may be more than one.
 - Dates with slashes are day first: 3/4/2026 is 3 April.
+- If you leave out the month or year, the agent takes it from the days the
+  runs were taken on.
 - A date with no run on it gets an abstention, not an empty answer.
-- "Every run" means every run in **your** scope. Use `--from`/`--to` or
-  `--facility` to narrow the scope itself.
 
 ### 12.3 Naming the item
 
+| Item | What it is |
+|---|---|
+| checkpoint | One stop on the route, e.g. `a3_back` |
+| zone | An area of the route holding one or more checkpoints, e.g. `rowA_back` |
+| finding | Something the run found at a checkpoint |
+| sensor alert | A threshold breach logged during the run |
+| image | An evidence image captured at a checkpoint (RGB, thermal, annotated, finding image) |
+| run | The run's own details: status, result, times, duration |
+
 - Names can be written loosely: "row A back" finds `rowA_back`.
 - A zone and a checkpoint can share a name. Say "at <name>" for the
-  checkpoint, "in the <name> zone" for the zone.
-- A zone or checkpoint not in your records gets an abstention.
-- The router recognises checkpoint names like `checkpoint_4`, `cp4`, `a3_back`
-  and zone names like `rowA_back`. Other names still work, but the router
-  scores them as typed.
+  checkpoint and "in the <name> zone" for the zone.
+- A zone or checkpoint that is not in your records gets an abstention.
+- The confidence router recognises names like `checkpoint_4`, `cp4`,
+  `a3_back` and `rowA_back` (see [8.3](#83-how-it-is-trained)). Other names
+  still work. They are just scored as typed.
 
-### 12.4 One thing per question
+### 12.4 One thing per question: avoid "and"
 
-Avoid "and". A joined question makes the agent fetch from several tables
-when it does not need to. It is slower and more likely to go wrong.
+Ask for one thing at a time. The data is fetched with SQL. A question joined
+with "and" makes the agent fetch from several tables and join them when it
+does not need to. That makes the answer slower and more likely to go wrong.
 
 | Avoid | Better |
 |---|---|
 | What was a3_back's status and its temperature in the latest run? | Was a3_back completed in the latest run? · What was the temperature at a3_back in the latest run? |
-| Which checkpoints failed and which were missed? | Which checkpoints failed in the latest run? · Which checkpoints were missed in the latest run? |
+| Which checkpoints failed and which were missed in the latest run? | Which checkpoints failed in the latest run? · Which checkpoints were missed in the latest run? |
 
-### 12.5 What can be asked
+### 12.5 Missed is not failed
 
-| Kind | Examples |
+A checkpoint has two separate fields, and questions often mix them up:
+
+- **status**: did the robot get there? `COMPLETED` or `MISSED`.
+- **result_status**: the verdict of an inspection that took place: `PASS`,
+  `FAIL` or `WARN`.
+
+A missed checkpoint was never inspected. It did not fail and it did not pass.
+
+| Words | Means |
 |---|---|
-| D1 threshold | "Which checkpoints exceeded the temperature threshold in the latest run?" · "Which checkpoints went over the vibration limit?" |
-| D2 counts | "How many checkpoints failed in the latest run?" · "Breakdown of findings by status" · "How many findings by feature?" |
-| D3 share | "What percentage of checkpoints were completed in the latest run?" |
-| D4 mean per zone | "Mean vibration per zone in the latest run" (vibration, temperature, PM2.5) |
-| D5 max per zone | "Which zone had the highest peak temperature?" |
-| D6 top five | "The five highest vibration readings in the latest run" |
-| D7 last two runs | "Which checkpoints are new in the latest run?" · "Which findings are new since the previous run?" · "Which sensor blocks were available last run but not this one?" |
-| D8 dates | "Over what period were the runs taken?" · "When was this route last run?" |
-| D9 alerts | "How many sensor alerts were logged, by severity?" |
-| D10 images | "How many images were captured at each checkpoint?" · "What thermal coverage exists on the latest run?" |
-| D11 declared counts | "Do the declared counts match the checkpoints in the record?" |
-| Records | "Which findings need review?" · "Which checkpoints were missed and why?" · "How did the latest run end?" |
-| Lookup | "Was a6_back completed?" · "Which zone is a3_back in?" · "What was the temperature at a3_back?" · "Which images were taken at a3_back?" |
-| Catalogue | "What questions can I ask about these records?" |
+| "failed", "did not pass", "FAIL" | Reached, inspected, verdict `FAIL` |
+| "missed", "skipped", "not reached", "not visited", "not inspected" | Status `MISSED` |
 
-Where the line falls:
+"Did not pass" is read as "failed".
 
-- "The temperature at a3_back" → lookup (one recorded value)
-- "Did a3_back go over the temperature limit" → derivation (D1)
-- "The highest temperature in rowA_back" → derivation (D5)
+### 12.6 What the agent can answer
 
-### 12.6 What is always refused
+The model first decides what kind of question it is:
 
-- **Why** something happened (`abstain_causation`)
-- **What will** happen, or when (`abstain_prediction`)
-- **A judgement**: safe, normal, compliant, better, worse (`abstain_determination`)
-- **Things the records never hold**: who, manufacturers, costs, how long a
-  route has existed (`abstain_not_captured`)
-- A figure no derivation keeps: a failure rate, an overall mean, the lowest
-  reading, gaps between runs, runs per week
-- Comparing runs other than the last two
-- Anything about another tenant's facilities. It is not refused as such:
-  those records are simply not there, so the answer covers your own records
-  only.
+| Kind | Meaning |
+|---|---|
+| derivation | A figure worked out over the runs (a count, share, mean, maximum, ranking, threshold comparison, run difference or dates), or a detail the runs recorded (findings, alerts, events, the run's details, missed reasons, notes) |
+| lookup | A value exactly as recorded, for a named run, zone or checkpoint: a reading, a status, a zone, an image |
+| catalogue | "What can I ask", "help" |
+| abstain | None of these can answer it |
 
-### 12.7 Checklist
+Then the confidence router checks that kind ([section 8](#8-the-confidence-router)).
 
-- [ ] Does it name the run?
-- [ ] Does it name the figure or the value?
-- [ ] Does it name the item?
+Rules the model follows:
+
+- "The temperature at <checkpoint>" is lookup. "The highest temperature in
+  <zone>" and "did <checkpoint> go over the limit" are derivation.
+- A question that asks for a figure and a recorded value together is derivation.
+- "Which images were taken at <checkpoint>" is lookup, however it is worded.
+- **Counting** images is derivation (D10): how many images, how many thermal
+  or RGB, how many work or are broken, which checkpoints captured none.
+- Any question about findings is derivation, however it is worded:
+  "findings by category", "what types of findings", "a breakdown".
+
+#### Derivations
+
+Set in `config/derivations.yaml`. The settings below are the current ones. If
+that file changes, so does what can be asked.
+
+**D1 Threshold comparison**
+Checks every checkpoint's reading against a limit. Per run: which checkpoints
+are over, how many are and are not, and by how much each is over or under.
+- Held for: temperature (`environment.temperature_c`) above 30 °C, and
+  vibration (`accelerometer.vibration_rms_g`) above 0.5 g.
+- Ask with: "threshold", "limit", "exceeded", "went over", "stayed under", "by how much"
+  - "Which checkpoints exceeded the temperature threshold in the latest run?"
+  - "By how much did each checkpoint go over the vibration limit in the first run?"
+- Not held: any other reading or limit.
+
+**D2 Condition count**
+Counts checkpoints whose `result_status` is `FAIL`. Per run: how many, which
+ones, out of how many, and which were left out of the count and why (e.g. a
+missed checkpoint).
+- Ask with: "how many failed", "which failed", "failure count"
+  - "How many checkpoints failed in the latest run?"
+  - "Which checkpoints were left out of the failure count in the latest run?"
+- Not held: checkpoints that did not fail. Only the ones that met the
+  condition are stored.
+
+**D2 Count by value: findings by status**
+Counts findings by status: `logged`, `needs_review`, `abstained` (each listed
+even at 0), plus any other status found, as written.
+- Ask with: "how many findings by status", "breakdown of findings", "how many need review"
+  - "Give a breakdown of findings by status in the latest run."
+
+**D2 Count by value: findings by feature** (new)
+Counts findings by feature. Every feature found is its own row, as recorded.
+Features that sound alike are never merged.
+- Ask with: "by feature", "what kinds of findings"
+  - "How many findings were recorded, by feature?"
+
+**D3 Proportion**
+Share of checkpoints with status `COMPLETED`. Per run: how many, out of how
+many, as a percentage, and which ones.
+- Ask with: "percentage", "share", "completion rate", "out of how many"
+  - "What percentage of checkpoints were completed in the latest run?"
+- Not held: a failure rate, or any other share.
+
+**D4 Mean per zone**
+Mean of a reading per zone, over the readings taken at the checkpoints.
+- Held for: vibration, temperature, PM2.5 (`particulate.pm2_5`)
+- A question about one checkpoint gets the mean of the zone it is in.
+- Ask with: "mean", "average"
+  - "What was the mean vibration per zone in the latest run?"
+  - "Mean temperature in rowA_back in the latest run?"
+- Not held: a mean for the whole run, humidity or any other field.
+
+**D5 Maximum per zone**
+Highest reading per zone, the checkpoint it came from and when.
+- Held for: vibration, temperature, PM2.5 (as D4)
+- Ask with: "highest", "peak", "maximum", "where was it highest"
+  - "Which zone had the highest peak temperature in the latest run?"
+  - "Which checkpoint recorded the highest vibration in the most recent run?"
+- Not held: the lowest reading.
+
+**D6 Top readings**
+The 5 highest readings in each run across all checkpoints, highest first,
+with the checkpoint each came from.
+- Held for: vibration, temperature, PM2.5 (as D4)
+- Ask with: "top five", "highest readings", "where did <checkpoint> rank"
+  - "What were the five highest vibration readings in the latest run?"
+- Not held: more than 5, the lowest, or a ranking within one zone.
+
+**D7 Run difference** (extended)
+Compares the latest run with the one before it. Three things, each as only
+in the earlier run, only in the latest, and in both, with counts:
+- **checkpoints** on the route
+- **findings**, matched by their id without the run's prefix
+- **sensor blocks** available at each checkpoint, with why a block was not
+  available in the other run
+- Ask with: "did the route change", "new checkpoints", "removed", "new
+  findings", "in both runs", "available last run but not this one"
+  - "Which checkpoints are new in the latest run?"
+  - "Which findings are new since the previous run?"
+  - "Which sensor blocks were available last run but not this one?"
+- Not held: any other pair of runs, whether a change is better or worse, or
+  how coverage changed as a figure (Q38).
+
+**D8 Dates of the runs**
+Across all runs: earliest and latest start, the days between, each day a run
+was taken on with its weekday, when each run started, and how many days in
+the span had no run.
+- Ask with: "when", "which days", "over what period", "weekend", "last run"
+  - "Over what period were the runs taken?"
+  - "Which runs were taken on 19/8/2026, and at what time?"
+  - "When was this route last run?"
+- Not held: runs per week. How long the route has existed is not recorded (Q20).
+
+**D9 Sensor alerts** (new)
+Per run: how many sensor alerts were logged, and how many of each severity
+(`warning` and `critical` always listed, even at 0; any other severity as written).
+- Ask with: "sensor alerts", "by severity", "how many alerts"
+  - "How many sensor alerts were logged, by severity?"
+
+**D10 Evidence images** (new)
+Per run and per checkpoint: how many images, how many thermal or RGB (by file
+name), and how many resolve to a readable file and how many do not.
+- Ask with: "how many images", "thermal coverage", "which checkpoints have no evidence", "broken", "resolve"
+  - "What thermal coverage exists on the most recent run?"
+  - "Which checkpoints captured no evidence?"
+- Not held: the share of images that resolved as a percentage (Q28).
+
+**D11 Declared counts** (new)
+Per run: whether the counts the robot reported for itself match the run's own
+lists. Seven checkpoint and finding counts, and each event's evidence count
+against its visit.
+- Ask with: "declared counts", "do the counts match", "reported counts"
+  - "Do the declared counts match the checkpoints in the record?"
+
+#### Records (details the runs wrote down)
+
+Not a figure: the run's own records, as written. Nothing is counted or
+averaged here.
+
+- the run itself: facility, run status, final result, start and end time,
+  duration, the counts the robot reported for itself
+- a checkpoint visit: completed or missed and why, result, what was observed,
+  operator notes
+- findings: what, where, how severe, status, recommended action
+- sensor alerts logged during the run
+- the run's event log
+- readings that were left out, and why
+
+Examples:
+- "Which findings need review in the latest run?"
+- "Which checkpoints were missed in the latest run, and why?"
+- "What recommended action is recorded at a3_back in the latest run?"
+- "How did the latest run end?"
+- "What operator notes are recorded against checkpoint_1?"
+
+#### Lookups (values as recorded)
+
+One recorded value of a named item. Nothing is worked out.
+
+| Table | Holds | Example |
+|---|---|---|
+| `checkpoints` | Status (`COMPLETED` / `MISSED`), verdict (`PASS` / `FAIL` / `WARN`), which zone a checkpoint is in, which checkpoints a zone holds, route order | "Was a6_back completed in the latest run?" · "Which zone is a3_back in?" |
+| `checkpoint_readings` | Every sensor reading at a checkpoint, or why one was left out (faulty or offline sensor, missed checkpoint) | "What was the temperature at a3_back in the latest run?" · "Why is there no PM2.5 reading at a3_back in the latest run?" |
+| `evidence` | The images captured at a checkpoint (evidence, thermal, annotated, finding images) | "Which images were taken at a3_back in the latest run?" |
+| `zones` | The zones a run's route passed through, in order | "Which zones did the route cover in the latest run?" |
+
+A reading that could not be trusted is still asked about the usual way. The
+answer says it was left out and why.
+
+#### Sensor words the agent understands
+
+| Words | Sensor block |
+|---|---|
+| vibration, shaking | accelerometer |
+| temperature, heat, how hot or cold, humidity, pressure | environment |
+| particulate, particles, dust, air quality, PM2.5, PM10 | particulate |
+
+#### Catalogue
+
+"What questions can I ask about these records?" lists what can be asked, by
+category, with one example each. Code writes it from
+`config/intent_catalogue.yaml`. The examples use a real checkpoint and zone
+from your records.
+
+### 12.7 When the agent abstains
+
+The agent abstains rather than guess. Expect "the records do not contain
+this" for:
+
+| Asked for | Answer's intent |
+|---|---|
+| **Why** something happened | `abstain_causation` |
+| **What will** happen, or when | `abstain_prediction` |
+| **A judgement**: safe, normal, compliant, acceptable, better, worse | `abstain_determination` |
+| **Something the records never hold**: costs, maintenance, people, manufacturers, other sites, how long the route has existed | `abstain_not_captured` |
+
+And also for:
+
+- a date, run, zone or checkpoint the records do not hold
+- a figure no derivation keeps: a failure rate, an overall mean, the lowest
+  reading, a ranking within a zone, runs per week
+- items that did not meet a condition: "which checkpoints did not fail" (the
+  passed and warned ones are not stored). "Did not pass" is different: it is
+  read as "failed" and answered
+- comparing runs other than the last two
+- a question the confidence router does not back. That one is unroutable
+  (`intent: null`), and the answer names what the records hold about the
+  checkpoint or zone, if one was recognised.
+
+These look close but are **not** refused:
+
+| Question | Why it is answered |
+|---|---|
+| "Why was checkpoint_3 missed?" | The missed reason is recorded |
+| "What changed at checkpoint_5 since the last run?" | A difference, not a cause |
+| "How many runs are recorded, and over what period?" | The span of runs, not the route's age |
+| "What action is recommended at checkpoint_4?" | A recorded action, not advice |
+
+Another tenant's facilities are not refused as such. Those records are simply
+not loaded, so the answer covers your own records only.
+
+If a question abstains and you think it should not, check it against the three
+parts in 12.1 and the lists in 12.6.
+
+### 12.8 Checklist
+
+- [ ] Does it name the run? (latest, first, a date, all runs)
+- [ ] Does it name the figure or the value? (threshold, mean, peak, top five,
+      percentage, by status, by severity, temperature at ...)
+- [ ] Does it name the item? (checkpoint, zone, finding, sensor alert, image, run)
 - [ ] Does it ask for one thing, with no "and"?
-- [ ] Is it in the table in 12.5?
+- [ ] Is the figure one of D1 to D11, a record, a lookup or the catalogue above?
 
 ---
+
 
 ## 13. Files in this milestone
 
