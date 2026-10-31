@@ -17,6 +17,10 @@ dependencies = [
     "pydyf==0.10.0",
     "pyyaml==6.0.2",
     "pillow==10.4.0",
+    # The confidence router (src/router). fastembed runs its local encoder;
+    # semantic-router does not pull it in.
+    "semantic-router==1.1.1",
+    "fastembed==0.9.1",
 ]
 
 [project.optional-dependencies]
