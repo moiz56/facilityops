@@ -1,7 +1,9 @@
 # tenant to facility mapping
 #
-# Read only by src/query/scope.py. Each tenant maps to the facility_ids it
-# owns. Only the tenant's own facility folders are read, and a record still
+# Read by src/query/scope.py, by src/compare/continuity.py for runs_per_day
+# only, and by src/standards/packs.py for standards_packs only. Each tenant
+# maps to the facility_ids it owns. Only the tenant's own facility folders
+# are read, and a record still
 # belongs to a tenant by the facility_id inside it, not by the folder it sits
 # in: a run in the wrong folder is dropped, never shown. A facility listed
 # under two tenants is an ambiguous mapping and is refused, never guessed.
@@ -11,21 +13,41 @@ record_patterns:                   # {facility_id} is filled with each facility 
   - "{facility_id}/*/run.json"     # data_tenant/<facility_id>/<run>/run.json
 
 # One tenant per facility. The sim_ tenants are simulator output with
-# fabricated readings.
+# fabricated readings. runs_per_day is the schedule: how many runs a day each
+# of the tenant's routes should have, which gives the continuity score its
+# runs_expected. standards_packs names the packs in config/standards/ whose
+# clauses the tenant's reports map findings to; none listed means no
+# standards section. nfpa_70b_2023 is still the placeholder pack.
 tenants:
   tenant_facility:
     facility_ids: [sis_facility_checkpoint_route]
+    runs_per_day: 1
+    standards_packs: [nfpa_70b_2023]
   tenant_racks:
     facility_ids: [sis_racks_checkpoint_route]
+    runs_per_day: 1
+    standards_packs: [nfpa_70b_2023]
   se4_clubhouse_checkpoint_route:
     facility_ids: [se4_clubhouse_checkpoint_route]
+    runs_per_day: 1
+    standards_packs: [nfpa_70b_2023]
   stretch3_checkpoint_route:
     facility_ids: [stretch3_checkpoint_route]
+    runs_per_day: 1
+    standards_packs: [nfpa_70b_2023]
   facility_ops:
     facility_ids: [facility_ops]
+    runs_per_day: 1
+    standards_packs: [nfpa_70b_2023]
   sim_facility_001:
     facility_ids: [sim_facility_001]
+    runs_per_day: 1
+    standards_packs: [nfpa_70b_2023]
   sim_facility_002:
     facility_ids: [sim_facility_002]
+    runs_per_day: 1
+    standards_packs: [nfpa_70b_2023]
   sim_facility_facilityops:
     facility_ids: [sim_facility_facilityops]
+    runs_per_day: 1
+    standards_packs: [nfpa_70b_2023]

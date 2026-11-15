@@ -1145,3 +1145,20 @@ h4.checkpoint-head {
 .action-priority { font-weight: bold; text-align: center; }
 .action-table .badge-small { display: inline-block; margin: 0 0.3em 0.2em 0; }
 .action-checkpoints { font-size: 0.9em; }
+
+/* Comparison readings: each checkpoint is three rows, previous, current and
+ * difference, kept together on one page, with space above and below it so
+ * one checkpoint reads apart from the next. The difference row is set smaller
+ * and muted, like the other secondary lines in the report. */
+.comparison-readings > tbody { break-inside: avoid; }
+.comparison-readings > tbody > tr:nth-child(even) { background: none; }
+.comparison-readings > tbody > tr:first-child > * { padding-top: 2mm; }
+.comparison-readings > tbody > tr.difference > * {
+  padding-bottom: 2mm;
+  font-size: 0.9em;
+  color: var(--muted);
+}
+
+/* A comparison row where the two runs differ: a bar down its first cell, so
+ * the rows that differ can be found by eye in a long table. */
+.comparison-differs > td:first-child { border-left: 2pt solid var(--primary-colour); }

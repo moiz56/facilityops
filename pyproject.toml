@@ -31,9 +31,11 @@ dev = [
 
 [project.scripts]
 #facilityops-report = "report.cli:main"
+# The standalone seal check. Loads only src/seal and the standard library.
+facilityops-verify = "seal.cli:verify_main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/common", "src/report"]
+packages = ["src/common", "src/report", "src/seal"]
 
 [tool.hatch.build.targets.wheel.sources]
 "src" = ""

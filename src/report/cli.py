@@ -34,9 +34,14 @@ from common.paths import (
 )
 from common.provenance import stamp
 from common.readability import CouldNotRead, could_not_read
+from common.runs import previous_run
 from common.schema import Record
 from common.signoff import RowSignOff, facility_rows, settings, sign_off
+from compare.continuity import route_continuity
+from compare.rounds import compare_rounds
 from report.derive import DerivedValues, derive_report_values
+from standards.packs import enabled_packs, load_packs
+from standards.render import evidence_images, map_findings
 from report.gaps import RUN_LEVEL, Gap, detect_gaps
 from report.images import ViewCell, build_view_grid
 from report.manifest import build_manifest, write_manifest
@@ -50,13 +55,20 @@ logger = logging.getLogger("report.cli")
 #: B-2 has its own derivation set; config/derivations.yaml is B-1's.
 DERIVATIONS_CONFIG = PROJECT_ROOT / "config" / "b2_derivations.yaml"
 AGENTS_CONFIG = PROJECT_ROOT / "config" / "agents.yaml"
-ACTION_MAPPING_CONFIG = PROJECT_ROOT / "config" / "action_mapping.yaml"   # B-3's, when sections.action_plan is onENV_FILE = PROJECT_ROOT / ".env"   # the provider's API key
+ACTION_MAPPING_CONFIG = PROJECT_ROOT / "config" / "action_mapping.yaml"   # B-3's, when sections.action_plan is on
+ENV_FILE = PROJECT_ROOT / ".env"   # the provider's API key
+TENANTS_CONFIG = PROJECT_ROOT / "config" / "tenants.yaml"   # runs_per_day and standards_packs
+SEALED_DIR = OUTPUT_DIR / "sealed"   # the seals continuity counts, one folder per route
 
 @dataclass(frozen=True)
 class Artifacts:
     """What the pipeline produced. Later stages add their outputs here."""
 
     record: Record
+    previous: Record | None         # the run before it on the same route, if found
+    comparison: dict | None         # previous against record, None without a previous run
+    continuity: dict | None         # the route's continuity up to this run, None when it has none
+    standards: dict | None          # findings against the enabled packs' clauses, None when none is enabled
     images: dict[str, list[ResolvedImage]]
     grids: dict[str, list[ViewCell]]
     gaps: list[Gap]
@@ -79,6 +91,12 @@ def run_pipeline(
     """
     # load
     record = load_record(record_path)
+
+    # previous run: the run of the same route before this one, from the run
+    # folders beside this one's.
+    previous, no_previous = previous_run(record_path, record)
+    if previous is None:
+        logger.warning("no previous run: %s", no_previous)
 
     # validate
     report_anomalies(record)
@@ -105,6 +123,31 @@ def run_pipeline(
     # same way gaps are, so the PDF and the manifest hold the same entries.
     unreadable = could_not_read(record, config)
 
+    # comparison with the previous run. Built once and passed on, the same way
+    # gaps are, so the PDF and the manifest hold the same differences.
+    on = config["sections"]
+    comparison = compare_rounds(previous, record, config) if previous and on.get("comparison", True) else None
+
+    # continuity of this run's route, from the run folders beside this one's
+    # and their seals. Only the runs before this one count: this run is
+    # sealed from this report, so it cannot be sealed yet.
+    tenants = load_config(TENANTS_CONFIG)
+    continuity, no_continuity = None, "continuity is switched off"
+    if on.get("continuity", True):
+        try:
+            continuity, no_continuity = route_continuity(record_path, record, SEALED_DIR, tenants)
+        except ConfigError as error:
+            continuity, no_continuity = None, str(error)
+        if continuity is None:
+            logger.warning("no continuity: %s", no_continuity)
+
+    # standards. The packs this facility's tenant enables, each read once, and
+    # this run's findings mapped to their clauses. Built once and passed to
+    # both render and manifest, so the two hold the same mapping.
+    packs = load_packs(enabled_packs(tenants, record.facility_id)) if on.get("standards", True) else []
+    standards = map_findings(record, packs)
+    standards_images = evidence_images(standards, evidence_root)
+
     # row sign-off. Built from the same images and could_not_read entries the
     # report prints, stamped with the report's own time, and passed to both
     # render and manifest.
@@ -123,18 +166,19 @@ def run_pipeline(
     # can know them (4.4).
     pdf_path, pages = render_document(
         record, gaps, derived, grids, config, output_dir, provenance, summary, intros, notes,
-        statement, actions, unreadable, signoffs,
+        statement, actions, unreadable, signoffs, comparison, no_previous, previous,
+        continuity, no_continuity, standards, standards_images,
     )
 
     # manifest. The same config path the render used, so the version stamp and
     # the config hash describe the config that was actually applied (4.4).
     manifest = build_manifest(
         record, gaps, images, pdf_path, config_path, provenance, pages, config, unreadable,
-        signoffs,
+        signoffs, previous.run_id if previous else None, comparison, packs, standards,
     )
 
     return Artifacts(
-        record=record, images=images, grids=grids, gaps=gaps, could_not_read=unreadable,
+        record=record, previous=previous, comparison=comparison, continuity=continuity, standards=standards, images=images, grids=grids, gaps=gaps, could_not_read=unreadable,
         row_signoff=signoffs, derived=derived, pdf_path=pdf_path, manifest=manifest,
     )
 

@@ -28,6 +28,7 @@ from common.signoff import RowSignOff
 from report.derive import alert_counts, computed_counts, declared_counts
 from report.gaps import RUN_LEVEL, Gap
 from report.render import PageMap
+from standards.packs import Pack
 
 # Every version in the manifest is a config value. `manifest.version` is the
 # shape of this file; the engine and template versions, the generation time and
@@ -60,6 +61,10 @@ def build_manifest(
     config: dict | None = None,
     could_not_read: list[CouldNotRead] | None = None,
     row_signoff: list[RowSignOff] | None = None,
+    previous_run_id: str | None = None,
+    comparison: dict | None = None,
+    packs: list[Pack] | None = None,
+    standards: dict | None = None,
 ) -> dict:
     """Build the manifest for one run.
 
@@ -84,6 +89,19 @@ def build_manifest(
     `row_signoff` is the same, for the rows the report signed off. Each entry
     carries the sign-off's own fields and not the list of what was not covered,
     which only the report's wording uses.
+
+    `previous_run_id` is the run before this one on the same route, from
+    common.runs.previous_run, or None when there is none to name.
+
+    `comparison` is compare.rounds.compare_rounds for that run against this
+    one, built once in the pipeline and passed here and to the report. The
+    manifest holds it as an array: one entry, or none without a previous run.
+
+    `packs` are the standards packs the facility's tenant enables. They are
+    part of the config that was applied, so config_hash covers them, every
+    clause and version included. `standards` is standards.render.map_findings
+    for those packs, the same mapping the report prints, or None when no pack
+    is enabled.
     """
     found = [image for images_of in images.values() for image in images_of]
 
@@ -96,10 +114,13 @@ def build_manifest(
         "manifest_version": setting(config, "manifest", "version"),
         "generated_at": provenance.generated_at,
         "source_run_id": provenance.source_run_id,
+        "previous_run_id": previous_run_id,
         "facility_id": record.facility_id,
         "engine_version": provenance.engine_version,
         "template_version": provenance.template_version,
-        "config_hash": hash_config(config),
+        "config_hash": hash_config(
+            {**config, "standards_packs": [asdict(pack) for pack in packs]} if packs else config
+        ),
         "report_file": pdf_path.name,
 
         # Measured off the document that was written, never estimated (4.4).
@@ -121,6 +142,8 @@ def build_manifest(
             "computed": asdict(computed_counts(record)),
         },
         "alerts": alert_counts(record),
+        "comparison": [comparison] if comparison else [],
+        "standards": standards,
     }
 
 

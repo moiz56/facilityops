@@ -1,0 +1,12 @@
+# The example pack in the Milestone 4 brief, word for word. The tests read
+# this copy, not config/standards/, so they keep working when the client's
+# pack replaces the placeholder there.
+
+pack_id: nfpa_70b_2023
+pack_version: "1.0"
+title: "NFPA 70B — Standard for Electrical Equipment Maintenance"
+clauses:
+  - clause: "11.3.2"
+    summary: "Infrared inspection of electrical connections"
+    maps_to_features: [thermal_hotspot, blocked_airflow_path]
+    evidence_required: [thermal_reading, evidence_image]

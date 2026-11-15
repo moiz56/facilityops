@@ -1,0 +1,112 @@
+{# Condition evidence against the enabled standards packs.
+
+   The same mapping the manifest carries in its `standards` key. One block per
+   pack: every clause, the findings mapped to it and the evidence they carry,
+   or "not assessed" when no finding maps to it. Then the findings that map to
+   no clause, and the non-certification statement, word for word.
+
+   It presents evidence against a clause and never says whether anything
+   complies. #}
+<section class="section standards" id="standards">
+
+  <h2>Condition evidence</h2>
+
+  <p class="lede">
+    Each clause of the enabled standards packs, with the findings from this run
+    whose type the pack maps to it, and the evidence those findings carry. A
+    clause no finding maps to is not assessed: no finding is not evidence that
+    the clause is met.
+  </p>
+
+  {% for pack in standards_packs %}
+    <h3>{{ pack.title }}</h3>
+    <p class="lede">
+      <span class="row-id">{{ pack.pack_id }}, version {{ pack.pack_version }}</span>
+    </p>
+
+    {% for clause in pack.clauses %}
+      <h4>Clause {{ clause.clause }}{% if clause.summary %}: {{ clause.summary }}{% endif %}</h4>
+
+      {% if clause.findings %}
+        <p class="gap-count">
+          {{ clause.findings | length }} finding{{ "" if clause.findings | length == 1 else "s" }} mapped.
+          Evidence the clause asks for: {{ clause.evidence_required | join(", ") if clause.evidence_required else "none listed" }}.
+        </p>
+
+        <table class="data-table standards-findings">
+          <thead>
+            <tr>
+              <th>Finding</th>
+              <th>Checkpoint</th>
+              <th>Severity</th>
+              <th>Status</th>
+              {% for name in clause.evidence_required %}
+                <th>{{ name }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in clause.findings %}
+              <tr>
+                <td>
+                  {{ entry.finding.feature | show }}
+                  <span class="row-id">{{ entry.finding.finding_id }}</span>
+                </td>
+                <td>{{ entry.finding.checkpoint_id | show }}</td>
+                <td>
+                  <span class="badge badge-small badge-{{ entry.finding.severity | severity_style }}">{{ entry.finding.severity }}</span>
+                </td>
+                <td>{{ entry.finding.status }}</td>
+                {% for item in entry.evidence %}
+                  <td>
+                    {% if item.src %}
+                      <img class="evidence-rgb" src="{{ item.src }}" alt="{{ item.field }}">
+                    {% else %}
+                      {{ item.text }}
+                    {% endif %}
+                  </td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="absent-note">Not assessed. No finding from this run maps to this clause.</p>
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+
+  <h3>Not mapped</h3>
+
+  {% if standards.unmapped %}
+    <p class="lede">
+      These finding types map to no clause in the enabled standards packs. None
+      is placed under a clause with a similar name.
+    </p>
+    <table class="data-table unmapped-table">
+      <thead>
+        <tr>
+          <th>Finding type</th>
+          <th>Findings</th>
+          <th>Checkpoints</th>
+          <th>Statement</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in standards.unmapped %}
+          <tr>
+            <td>{{ entry.feature | show }}</td>
+            <td class="figure">{{ entry.finding_ids | length }}</td>
+            <td class="action-checkpoints">{{ entry.checkpoints | join(", ") }}</td>
+            <td>{{ entry.statement }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="absent-note">Every finding from this run maps to a clause in the enabled standards packs.</p>
+  {% endif %}
+
+  <p class="lede"><strong>{{ standards.statement }}</strong></p>
+
+</section>

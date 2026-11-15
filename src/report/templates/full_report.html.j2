@@ -48,6 +48,25 @@
   {% include "_alerts.html.j2" %}
 {% endif %}
 
+{# This run against the run before it on the same route. Not one of 5.7's
+   seven sections and not optional: it always renders, and says why when there
+   was no previous run to compare with. #}
+{% if sections.comparison %}
+  {% include "_comparison.html.j2" %}
+{% endif %}
+
+{# The route's continuity up to this run. Not one of 5.7's seven sections and
+   not optional, like the comparison: it says why when there is no score. #}
+{% if sections.continuity %}
+  {% include "_continuity.html.j2" %}
+{% endif %}
+
+{# Findings against the clauses of the standards packs the facility's tenant
+   enables. Renders only when at least one pack is enabled. #}
+{% if sections.standards %}
+  {% include "_standards.html.j2" %}
+{% endif %}
+
 {% if sections.zone_telemetry %}
   {% include "_zone.html.j2" %}
 {% endif %}

@@ -1,0 +1,19 @@
+# PLACEHOLDER standards pack.
+#
+# Copied word for word from the example pack in the Milestone 4 brief, until
+# the client sends the real pack. Replace this whole file with theirs, keeping
+# the file name if the pack_id stays nfpa_70b_2023. No clause or mapping here
+# was written by us: do not add any.
+#
+# airflow_obstruction is deliberately absent. It sounds like
+# blocked_airflow_path but is a different feature, and the brief uses it as
+# the unmapped case.
+
+pack_id: nfpa_70b_2023
+pack_version: "1.0"
+title: "NFPA 70B — Standard for Electrical Equipment Maintenance"
+clauses:
+  - clause: "11.3.2"
+    summary: "Infrared inspection of electrical connections"
+    maps_to_features: [thermal_hotspot, blocked_airflow_path]
+    evidence_required: [thermal_reading, evidence_image]

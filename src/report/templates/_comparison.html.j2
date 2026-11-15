@@ -1,0 +1,297 @@
+{# Comparison with the previous run.
+
+   The same comparison the manifest carries in its `comparison` array: the
+   previous run is the run before this one on the same route, the current run
+   is this one. It states what differs and never judges it. Each difference
+   carries the attribution the records support, or UNATTRIBUTED when they say
+   nothing.
+
+   With no previous run there is no comparison, and the section says why
+   rather than leaving itself out. #}
+<section class="section comparison" id="comparison">
+
+  <h2>Comparison with the previous run</h2>
+
+  {% if comparison %}
+    <p class="lede">
+      What differs between this run and the run before it on the same route.
+      Each difference is stated as recorded, with the reason the records give
+      for it, or UNATTRIBUTED where they give none.
+    </p>
+
+    <table class="data-table comparison-runs">
+      <thead>
+        <tr>
+          <th></th>
+          <th>Run</th>
+          <th>Run date</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Previous run</td>
+          <td>{{ comparison.previous_run.run_id }}</td>
+          <td>{{ comparison.previous_run.run_date | show }}</td>
+        </tr>
+        <tr>
+          <td>Current run</td>
+          <td>{{ comparison.current_run.run_id }}</td>
+          <td>{{ comparison.current_run.run_date | show }}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="gap-count">
+      {% if comparison.days_between is none %}
+        Days between the two runs: not recorded.
+      {% else %}
+        {{ comparison.days_between }} day{{ "" if comparison.days_between == 1 else "s" }} between the two runs.
+      {% endif %}
+    </p>
+
+    <h3>Checkpoints</h3>
+
+    {% set in_both = comparison.checkpoints.in_both %}
+    {% set differ = comparison_checkpoints | selectattr("differs") | list | length %}
+    <p class="lede">
+      Every checkpoint on either run's route, with its status and result in
+      each run. A row is marked where the two runs differ: a checkpoint on one
+      route only (ROUTE_CHANGE), reached in one run only (MISSED), or reached
+      in both with a different result.
+    </p>
+
+    <p class="gap-count">
+      {{ comparison_checkpoints | length }} checkpoint{{ "" if comparison_checkpoints | length == 1 else "s" }} on either route,
+      {{ in_both }} reached in both runs, {{ differ }} marked as differing.
+    </p>
+
+    <table class="data-table comparison-checkpoints">
+      <thead>
+        <tr>
+          <th>Checkpoint</th>
+          <th>Previous run</th>
+          <th>Current run</th>
+          <th>Attribution</th>
+          <th>Missed reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in comparison_checkpoints %}
+          <tr{% if row.differs %} class="comparison-differs"{% endif %}>
+            <td>
+              {{ row.id }}
+              {% if row.name and row.name != row.id %}
+                <span class="row-id">{{ row.name }}</span>
+              {% endif %}
+            </td>
+            <td>{{ row.previous }}</td>
+            <td>{{ row.current }}</td>
+            <td>
+              {% if row.attribution %}
+                <span class="gap-tag">{{ row.attribution }}</span>
+                <span class="row-id">{{ row.meaning }}</span>
+              {% else %}
+                No difference
+              {% endif %}
+            </td>
+            <td>{{ row.missed_reason | show("—") }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h3>Sensors</h3>
+
+    {% set checked = in_both * comparison_blocks %}
+    <p class="lede">
+      Each sensor block at the checkpoints reached in both runs. A block is
+      usable when the whole reading is usable and its device flag is not false.
+      Listed are the blocks usable in one run and not the other, with the
+      state of each run.
+    </p>
+
+    <p class="gap-count">
+      {{ checked }} block{{ "" if checked == 1 else "s" }} checked
+      ({{ in_both }} checkpoint{{ "" if in_both == 1 else "s" }} × {{ comparison_blocks }} blocks),
+      {{ comparison_sensors | length }} usable in one run only.
+    </p>
+
+    {% if comparison_sensors %}
+      <table class="data-table comparison-sensors">
+        <thead>
+          <tr>
+            <th>Checkpoint</th>
+            <th>Block</th>
+            <th>Previous run</th>
+            <th>Current run</th>
+            <th>Attribution</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in comparison_sensors %}
+            <tr class="comparison-differs">
+              <td>{{ row.checkpoint_id }}</td>
+              <td>
+                {{ row.block }}
+                {% if row.device %}<span class="row-id">{{ row.device }}</span>{% endif %}
+              </td>
+              <td>{{ row.previous }}</td>
+              <td>{{ row.current }}</td>
+              <td>
+                <span class="gap-tag">{{ row.attribution }}</span>
+                <span class="row-id">{{ row.meaning }}</span>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="absent-note">
+        Every sensor block usable in one run was usable in the other.
+      </p>
+    {% endif %}
+
+    <h3>Readings</h3>
+
+    <p class="lede">
+      Measurements that differ between the two runs, at the checkpoints reached
+      in both and in the sensor blocks usable in both. Each cell gives the
+      previous value, the current value, and under them the difference, current
+      minus previous. A dash means both runs recorded the same value.
+    </p>
+
+    {% for table in comparison_readings %}
+      <h4>{{ table.name }}</h4>
+      <table class="data-table comparison-readings">
+        <thead>
+          <tr>
+            <th>Checkpoint</th>
+            <th></th>
+            {% for column in table.columns %}
+              <th class="figure">{{ column }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        {# One tbody per checkpoint: its previous, current and difference rows,
+           kept together on one page. A field the two runs printed the same is
+           one dash across all three rows. #}
+        {% for row in table.rows %}
+          <tbody>
+            <tr>
+              <td rowspan="3">{{ row.checkpoint_id }}</td>
+              <td>Previous</td>
+              {% for cell in row.cells %}
+                {% if cell %}
+                  <td class="figure">{{ cell.previous }}</td>
+                {% else %}
+                  <td class="figure" rowspan="3">—</td>
+                {% endif %}
+              {% endfor %}
+            </tr>
+            <tr>
+              <td>Current</td>
+              {% for cell in row.cells if cell %}
+                <td class="figure">{{ cell.current }}</td>
+              {% endfor %}
+            </tr>
+            <tr class="difference">
+              <td>Difference</td>
+              {% for cell in row.cells if cell %}
+                <td class="figure">
+                  {% if cell.difference %}
+                    {{ cell.difference }}
+                  {% else %}
+                    <span class="gap-tag">{{ cell.attribution }}</span>
+                  {% endif %}
+                </td>
+              {% endfor %}
+            </tr>
+          </tbody>
+        {% endfor %}
+      </table>
+    {% else %}
+      <p class="absent-note">
+        No measurement differs between the two runs at the checkpoints and
+        sensor blocks compared.
+      </p>
+    {% endfor %}
+
+    <h3>Findings</h3>
+
+    <p class="lede">
+      Every run-level finding of both runs, matched by checkpoint and feature.
+      A finding in the previous run only is absent from the current run. That
+      is not the same as resolved: the records do not say why it is absent.
+    </p>
+
+    {% set changes = comparison.finding_changes %}
+    <p class="gap-count">
+      {{ changes.in_both | length }} in both runs, {{ changes.only_in_previous | length }} in the previous
+      run only, {{ changes.only_in_current | length }} in the current run only. Each run's cell gives the
+      finding's severity and status, or Not recorded.
+    </p>
+
+    {% if comparison_findings %}
+      <table class="data-table comparison-findings">
+        <thead>
+          <tr>
+            <th>Checkpoint</th>
+            <th>Feature</th>
+            <th>Previous run</th>
+            <th>Current run</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in comparison_findings %}
+            <tr{% if row.differs %} class="comparison-differs"{% endif %}>
+              <td>{{ row.checkpoint_id | show }}</td>
+              <td>{{ row.feature | show }}</td>
+              <td>{{ row.previous }}</td>
+              <td>{{ row.current }}</td>
+              <td>{{ row.description | show }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="absent-note">
+        Neither run recorded a finding.
+      </p>
+    {% endif %}
+
+    <h3>Coverage</h3>
+
+    <p class="lede">
+      Each run's coverage figures over the whole run, and the difference,
+      current minus previous.
+    </p>
+
+    <table class="data-table comparison-coverage">
+      <thead>
+        <tr>
+          <th></th>
+          <th class="figure">Previous run</th>
+          <th class="figure">Current run</th>
+          <th class="figure">Difference</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in comparison_coverage %}
+          <tr>
+            <td>{{ row.label }}</td>
+            <td class="figure">{{ row.previous }}</td>
+            <td class="figure">{{ row.current }}</td>
+            <td class="figure">{{ row.difference }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+  {% else %}
+    <p class="absent-note">
+      No comparison was made: {{ no_comparison | show("no previous run was found") }}.
+    </p>
+  {% endif %}
+
+</section>

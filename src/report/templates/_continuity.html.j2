@@ -1,0 +1,147 @@
+{# Record continuity of this run's route.
+
+   How much of the intended record exists, from the route's first run up to
+   this one: the sealed runs, how complete they were, and the runs the
+   schedule expects. Continuity says nothing about condition, and the section
+   says so. Seals and the chain are reported beside it, as separate claims.
+
+   With no continuity there is no score, and the section says why rather
+   than leaving itself out. #}
+<section class="section continuity" id="continuity">
+
+  <h2>Record continuity</h2>
+
+  {% if continuity %}
+    <p class="lede">
+      Continuity is how much of the intended record exists for this route: the
+      sealed runs, times how complete they were, out of the runs the schedule
+      expects. It says nothing about condition. A route where every scheduled
+      run was sealed and every checkpoint failed has 100% continuity.
+    </p>
+
+    <p class="lede">
+      The window runs from the route's first run to this run's date. Only the
+      runs before this one are counted: this run is sealed from this report,
+      so it has no seal yet.
+    </p>
+
+    {% set days = continuity_days %}
+    {% set per_day = (continuity.runs_expected // days) if days else 0 %}
+    <table class="data-table continuity-score">
+      <tbody>
+        <tr>
+          <td>Route</td>
+          <td>{{ continuity.route_id }}</td>
+        </tr>
+        <tr>
+          <td>Window</td>
+          <td>
+            {{ continuity.window.from }} to {{ continuity.window.to }}
+            <span class="row-id">{{ days }} day{{ "" if days == 1 else "s" }}</span>
+          </td>
+        </tr>
+        <tr>
+          <td>Runs expected</td>
+          <td>
+            {{ continuity.runs_expected }}
+            <span class="row-id">{{ per_day }} a day for {{ days }} day{{ "" if days == 1 else "s" }}</span>
+          </td>
+        </tr>
+        <tr>
+          <td>Runs completed</td>
+          <td>
+            {{ continuity.runs_completed }}
+            <span class="row-id">Runs in the window with a seal</span>
+          </td>
+        </tr>
+        <tr>
+          <td>Coverage mean</td>
+          <td>
+            {{ continuity.coverage_mean | show("no sealed runs") }}
+            <span class="row-id">Mean checkpoint completion of the sealed runs</span>
+          </td>
+        </tr>
+        <tr>
+          <td>Continuity</td>
+          <td>
+            {{ continuity.continuity_formatted }}
+            <span class="row-id">
+              ({{ continuity.runs_completed }} × {{ continuity.coverage_mean | show("0") }}) ÷ {{ continuity.runs_expected }}
+            </span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Runs missing</h3>
+
+    <p class="gap-count">
+      {{ continuity.runs_missing | length }} scheduled run{{ "" if continuity.runs_missing | length == 1 else "s" }}
+      with no seal, on {{ continuity_missing | length }} day{{ "" if continuity_missing | length == 1 else "s" }}.
+    </p>
+
+    {% if continuity_missing %}
+      <table class="data-table continuity-missing">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th class="figure">Runs missing</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in continuity_missing %}
+            <tr>
+              <td>{{ row.date }}</td>
+              <td class="figure">{{ row.runs }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="absent-note">
+        Every day in the window has the runs the schedule expects.
+      </p>
+    {% endif %}
+
+    <h3>Seals and chain</h3>
+
+    <p class="lede">
+      Each counted run's seal checked against its record, evidence and outputs
+      as they are now. Continuity and the chain are separate claims: a complete
+      set of runs with a broken chain is not the same as a sparse set with an
+      intact one.
+    </p>
+
+    {% set unchecked = continuity.runs_completed - continuity.seals_verified - continuity.seals_broken %}
+    <table class="data-table continuity-seals">
+      <tbody>
+        <tr>
+          <td>Seals verified</td>
+          <td class="figure">{{ continuity.seals_verified }}</td>
+          <td><span class="row-id">Every check passed</span></td>
+        </tr>
+        <tr>
+          <td>Seals broken</td>
+          <td class="figure">{{ continuity.seals_broken }}</td>
+          <td><span class="row-id">At least one check failed</span></td>
+        </tr>
+        <tr>
+          <td>Could not verify</td>
+          <td class="figure">{{ unchecked }}</td>
+          <td><span class="row-id">No check failed, but at least one could not be made</span></td>
+        </tr>
+        <tr>
+          <td>Chain</td>
+          <td class="figure">{{ "Intact" if continuity.chain_intact else "Not intact" }}</td>
+          <td><span class="row-id">Intact only when every counted seal's link to the one before it was checked and holds</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+  {% else %}
+    <p class="absent-note">
+      No continuity was worked out: {{ no_continuity | show("no route folder was found") }}.
+    </p>
+  {% endif %}
+
+</section>

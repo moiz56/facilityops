@@ -23,7 +23,7 @@ import logging
 import tempfile
 from dataclasses import dataclass
 from functools import partial
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Sequence
 
@@ -38,9 +38,11 @@ from common.schema import (
     Checkpoint, Finding, Point2D, Pose, Record, SensorAlert, SensorBlock, SensorWarning,
 )
 from common.signoff import RowSignOff
+from compare.rounds import first_entries
 from report.derive import DerivedValues, ZoneStat
 from report.gaps import RUN_LEVEL, Gap, GapType, disagreeing_counts, offline_block_gaps
 from report.images import GRID_COLUMNS, ViewCell, prepare_image
+from standards.render import IMAGE
 
 logger = logging.getLogger("report.render")
 
@@ -88,6 +90,14 @@ SECTION_NAMES = (
 #: page also holds B-2's coverage statement, below the summary. Its switch is on
 #: only when B-2 gave text for either (see switches_for), so the manifest names
 #: it only when the PDF holds it.
+#:
+#: The comparison is not one of the seven either. Its switch is on unless
+#: config turns it off: it renders the comparison, or says why there is none.
+#: Continuity likewise.
+#:
+#: The condition evidence section is on when config leaves it on and the
+#: facility's tenant enables at least one standards pack. It holds one block
+#: per pack.
 RENDERED_BLOCKS = (
     ("cover", "cover", "Cover"),
     ("executive_summary", "executive-summary", "Executive summary"),
@@ -99,6 +109,9 @@ RENDERED_BLOCKS = (
     ("coverage", "row-signoff", "Row sign-off"),
     ("findings", "findings", "Findings"),
     ("alerts", "alerts", "Sensor alerts"),
+    ("comparison", "comparison", "Comparison with the previous run"),
+    ("continuity", "continuity", "Record continuity"),
+    ("standards", "standards", "Condition evidence"),
     ("zone_telemetry", "zone-telemetry", "Zone telemetry"),
     ("checkpoints", "checkpoints", "Checkpoints"),
     ("summary", "summary", "Run summary"),
@@ -1518,13 +1531,290 @@ def sections(config: dict) -> dict[str, bool]:
 
 def switches_for(
     config: dict, executive_summary: str | None, coverage_statement: str | None = None,
-    action_plan: dict | None = None,
+    action_plan: dict | None = None, standards: dict | None = None,
 ) -> dict[str, bool]:
     """The seven sections' switches, plus the agents' two pages: the executive
     summary page renders when B-2 gave a summary, a coverage statement, or both;
-    the action plan when B-3 gave one."""
+    the action plan when B-3 gave one. The comparison and continuity render
+    unless config switches them off. Condition evidence renders when it is not
+    switched off and a standards pack is enabled; the pipeline gives no
+    mapping when it is off."""
     on = executive_summary is not None or coverage_statement is not None
-    return {**sections(config), "executive_summary": on, "action_plan": action_plan is not None}
+    optional = config["sections"]
+    return {
+        **sections(config), "executive_summary": on, "action_plan": action_plan is not None,
+        "comparison": optional.get("comparison", True), "continuity": optional.get("continuity", True),
+        "standards": standards is not None,
+    }
+
+
+def standards_view(
+    standards: dict | None, record: Record, images: dict[str, ResolvedImage],
+    image_dir: Path | None, field_units: dict[str, str], field_places: dict[str, int],
+) -> list[dict]:
+    """The standards mapping as the template prints it, one entry per pack.
+
+    Each mapped finding is looked up by id for what the reader needs to find
+    it again. Each evidence value becomes an image to embed, the reason an
+    image cannot be shown, or a reading in the units and decimals config sets
+    for that field, the same way checkpoint images and sensor readings print.
+    """
+    if standards is None:
+        return []
+    by_id = first_findings_by_id(record)
+    view = []
+    for pack in standards["packs"]:
+        clauses = []
+        for clause in pack["clauses"]:
+            findings = []
+            for entry in clause["findings"]:
+                items = []
+                for item in entry["evidence"]:
+                    shown = {"field": item["field"], "src": None, "text": None}
+                    if item["kind"] == IMAGE:
+                        image = images.get(item["value"])
+                        shown["src"] = image_source(image, image_dir)
+                        shown["text"] = image_absence(image, "Not recorded", "Image could not be shown")
+                    elif isinstance(item["value"], (int, float)) and not isinstance(item["value"], bool):
+                        shown["text"] = reading(
+                            item["value"], field_units.get(item["field"]), field_places.get(item["field"]),
+                        )
+                    else:
+                        shown["text"] = show(item["value"])
+                    items.append(shown)
+                findings.append({"finding": by_id[entry["finding_id"]], "evidence": items})
+            clauses.append({**clause, "findings": findings})
+        view.append({**pack, "clauses": clauses})
+    return view
+
+
+def first_findings_by_id(record: Record) -> dict[str, Finding]:
+    """finding_id -> the first finding with it, the one the mapping counted."""
+    found = {}
+    for finding in record.findings:
+        found.setdefault(finding.finding_id, finding)
+    return found
+
+
+def continuity_days(continuity: dict | None) -> int | None:
+    """How many days the continuity window covers, both end days counted."""
+    if continuity is None:
+        return None
+    window = continuity["window"]
+    return (date.fromisoformat(window["to"]) - date.fromisoformat(window["from"])).days + 1
+
+
+def continuity_missing(continuity: dict | None) -> list[dict]:
+    """runs_missing as one row per date with how many runs it is short, in
+    date order. runs_missing lists a date once per missing run."""
+    if continuity is None:
+        return []
+    short: dict[str, int] = {}
+    for day in continuity["runs_missing"]:
+        short[day] = short.get(day, 0) + 1
+    return [{"date": day, "runs": runs} for day, runs in short.items()]
+
+
+#: What each attribution means, printed under it in the comparison tables.
+ATTRIBUTION_MEANING = {
+    "ROUTE_CHANGE": "On this run's route and not on the other's",
+    "MISSED": "Not reached in the other run",
+    "SENSOR_UNAVAILABLE": "Not usable in the other run",
+    "VALUE_CHANGED": "Recorded in both runs with different values",
+    "UNATTRIBUTED": "The records do not say why",
+}
+
+
+#: Under a result change's attribution: UNATTRIBUTED alone would not say what differed.
+RESULT_CHANGE_MEANING = "Result differs. The records do not say why"
+
+
+def comparison_checkpoint_rows(
+    comparison: dict | None, previous: Record | None, current: Record,
+) -> list[dict]:
+    """Every checkpoint on either route, with each run's status and result side
+    by side: the current run's route order, then the checkpoints only on the
+    previous run's route.
+
+    A row differs when the comparison lists it - a route change, a miss or a
+    result change. That is read back off the comparison rather than worked out
+    again here, so the page marks exactly the rows the manifest carries.
+    """
+    if comparison is None or previous is None:
+        return []
+    before, now = first_entries(previous), first_entries(current)
+    checkpoints = comparison["checkpoints"]
+    listed = {
+        entry["id"]: entry
+        for key in ("only_in_previous", "only_in_current") for entry in checkpoints[key]
+    }
+    results = {entry["checkpoint_id"]: entry for entry in comparison["result_changes"]}
+    rows = []
+    for cid in [*now, *(cid for cid in before if cid not in now)]:
+        entry = listed.get(cid) or results.get(cid)
+        if cid in listed:
+            meaning = ATTRIBUTION_MEANING[entry["attribution"]]
+        else:
+            meaning = RESULT_CHANGE_MEANING if entry else None
+        rows.append({
+            "id": cid,
+            "name": (now.get(cid) or before[cid]).checkpoint_name,
+            "previous": run_state(before.get(cid)),
+            "current": run_state(now.get(cid)),
+            "attribution": entry["attribution"] if entry else None,
+            "meaning": meaning,
+            "missed_reason": entry.get("missed_reason") if entry else None,
+            "differs": entry is not None,
+        })
+    return rows
+
+
+def run_state(checkpoint: Checkpoint | None) -> str:
+    """A checkpoint's status and result in one run, or that it was not on the route."""
+    if checkpoint is None:
+        return "Not on route"
+    return f"{checkpoint.status} · {checkpoint.result_status}"
+
+
+def comparison_sensor_rows(comparison: dict | None, config: dict) -> list[dict]:
+    """Each sensor block usable in one run and not the other, with both runs'
+    state side by side: "Usable", or the reason it was not, and the device
+    the block's flag names."""
+    if comparison is None:
+        return []
+    devices = {
+        block: device_name(flag)
+        for flag, block in setting(config, "sensor", "subsystem_flags").items()
+    }
+    sensors = comparison["sensors"]
+    return [
+        {
+            "checkpoint_id": entry["checkpoint_id"],
+            "block": entry["block"].capitalize(),
+            "device": devices.get(entry["block"]),
+            "previous": "Usable" if usable_in == "previous" else entry["reason"],
+            "current": "Usable" if usable_in == "current" else entry["reason"],
+            "attribution": entry["attribution"],
+            "meaning": ATTRIBUTION_MEANING[entry["attribution"]],
+        }
+        for usable_in, key in (("previous", "only_in_previous"), ("current", "only_in_current"))
+        for entry in sensors[key]
+    ]
+
+
+def comparison_finding_rows(
+    comparison: dict | None, previous: Record | None, current: Record,
+) -> list[dict]:
+    """The comparison's findings - only in the previous run, then only in the
+    current one, then in both - each with its severity and status in both
+    runs side by side, and its description. A finding in one run only is a
+    row that differs."""
+    if comparison is None or previous is None:
+        return []
+    before, now = first_findings(previous), first_findings(current)
+    changes = comparison["finding_changes"]
+    rows = []
+    for key in ("only_in_previous", "only_in_current", "in_both"):
+        for entry in changes[key]:
+            found = (entry["checkpoint_id"], entry["feature"])
+            old, new = before.get(found), now.get(found)
+            rows.append({
+                **entry,
+                "previous": finding_state(old),
+                "current": finding_state(new),
+                "description": (new or old).description,
+                "differs": key != "in_both",
+            })
+    return rows
+
+
+def first_findings(record: Record) -> dict[tuple[str | None, str | None], Finding]:
+    """Each (checkpoint_id, feature)'s first finding in the run, the one the
+    comparison matched."""
+    found: dict[tuple[str | None, str | None], Finding] = {}
+    for finding in record.findings:
+        found.setdefault((finding.checkpoint_id, finding.feature), finding)
+    return found
+
+
+def finding_state(finding: Finding | None) -> str:
+    """A finding's severity and status in one run, or that the run did not record it."""
+    if finding is None:
+        return "Not recorded"
+    return f"{finding.severity} · {finding.status}"
+
+
+#: The coverage figures the comparison prints, in order, with their labels.
+COVERAGE_LABELS = (
+    ("evidence", "Evidence images"),
+    ("missed", "Missed checkpoints"),
+    ("could_not_read", "Could not read"),
+)
+
+
+def comparison_coverage_rows(comparison: dict | None) -> list[dict]:
+    """Each coverage figure for both runs and the difference, current minus
+    previous, signed, or 0 when the two are equal."""
+    if comparison is None:
+        return []
+    changes = comparison["coverage_changes"]
+    rows = []
+    for name, label in COVERAGE_LABELS:
+        previous, current = changes[f"{name}_previous"], changes[f"{name}_current"]
+        difference = current - previous
+        rows.append({
+            "label": label, "previous": previous, "current": current,
+            "difference": f"{difference:+d}" if difference else "0",
+        })
+    return rows
+
+
+def comparison_reading_tables(
+    comparison: dict | None, field_units: dict[str, str], field_places: dict[str, int],
+) -> list[dict]:
+    """The comparison's reading changes as one table per sensor block, in
+    SENSOR_BLOCKS order: a column per field of the block, a row per checkpoint
+    with at least one difference in it, in route order. A block with no
+    difference has no table.
+
+    A cell is None where the two runs printed the same value, so the template
+    prints a dash, and every reading change is in exactly one cell.
+    """
+    if comparison is None:
+        return []
+    changes = comparison["reading_changes"]
+    by_key = {(entry["checkpoint_id"], entry["field"]): entry for entry in changes}
+    checkpoints = list(dict.fromkeys(entry["checkpoint_id"] for entry in changes))
+    tables = []
+    for key, name, block_fields in SENSOR_BLOCKS:
+        rows = []
+        for cid in checkpoints:
+            cells = [
+                reading_cell(by_key.get((cid, f"{key}.{field}")), field_places.get(field))
+                for field, _ in block_fields
+            ]
+            if any(cells):
+                rows.append({"checkpoint_id": cid, "cells": cells})
+        if rows:
+            columns = [
+                f"{label} ({field_units[field]})" if field in field_units else label
+                for field, label in block_fields
+            ]
+            tables.append({"name": name, "columns": columns, "rows": rows})
+    return tables
+
+
+def reading_cell(entry: dict | None, places: int | None) -> dict | None:
+    """One reading change as its cell prints it: both values at the field's
+    places, the difference, and the attribution."""
+    if entry is None:
+        return None
+    return {
+        "previous": measure(entry["previous"], places) or "Not recorded",
+        "current": measure(entry["current"], places) or "Not recorded",
+        "difference": entry["difference_formatted"],
+        "attribution": entry["attribution"],
+    }
 
 
 def summary_blocks(text: str | None) -> list[tuple[str, list[str]]]:
@@ -1664,6 +1954,13 @@ def render_html(
     action_plan: dict | None = None,
     could_not_read: Sequence[CouldNotRead] = (),
     row_signoff: Sequence[RowSignOff] = (),
+    comparison: dict | None = None,
+    no_comparison: str | None = None,
+    previous: Record | None = None,
+    continuity: dict | None = None,
+    no_continuity: str | None = None,
+    standards: dict | None = None,
+    standards_images: dict[str, ResolvedImage] | None = None,
 ) -> str:
     """Render the whole report to HTML.
 
@@ -1685,6 +1982,15 @@ def render_html(
     summary page, as tables; None leaves it out. `could_not_read` is the same
     list the manifest carries, printed as its own section after the gap list.
     `row_signoff` is likewise the manifest's rows, printed after could_not_read.
+    `comparison` is the manifest's comparison with the previous run, printed
+    after the alerts; None prints `no_comparison`, the reason there is none.
+    `previous` is the run the comparison was made against, read for its own
+    statuses, results and findings, which the comparison tables print beside
+    this run's. `continuity` is the route's continuity up to this run, printed
+    after the comparison; None prints `no_continuity`, the reason there is none.
+    `standards` is the manifest's standards mapping, printed after continuity,
+    with `standards_images` the image paths it holds, resolved; None leaves
+    the section out, since no pack is enabled.
     """
     rows = count_rows(derived, disagreeing_counts(record))
     evidence = evidence_rows(record, gaps)
@@ -1694,7 +2000,7 @@ def render_html(
     field_units = units(config)
     field_places = decimals(config)
     template = environment(field_places).get_template("full_report.html.j2")
-    section_switches = switches_for(config, executive_summary, coverage_statement, action_plan)
+    section_switches = switches_for(config, executive_summary, coverage_statement, action_plan, standards)
     # Matched to the checkpoint object itself, not its id: an id can repeat.
     notes = {id(cp): note for cp, note in zip(record.checkpoints, item_notes or ()) if note}
     return template.render(
@@ -1733,6 +2039,22 @@ def render_html(
         run_level=RUN_LEVEL,
         could_not_read=list(could_not_read),
         row_signoff=list(row_signoff),
+        comparison=comparison,
+        no_comparison=no_comparison,
+        comparison_checkpoints=comparison_checkpoint_rows(comparison, previous, record),
+        comparison_sensors=comparison_sensor_rows(comparison, config),
+        comparison_blocks=len(setting(config, "sensor", "subsystem_flags")),
+        comparison_readings=comparison_reading_tables(comparison, field_units, field_places),
+        comparison_findings=comparison_finding_rows(comparison, previous, record),
+        comparison_coverage=comparison_coverage_rows(comparison),
+        continuity=continuity,
+        no_continuity=no_continuity,
+        continuity_days=continuity_days(continuity),
+        continuity_missing=continuity_missing(continuity),
+        standards=standards,
+        standards_packs=standards_view(
+            standards, record, standards_images or {}, image_dir, field_units, field_places,
+        ),
         missed=coverage_items(record, gaps, GapType.MISSED_CHECKPOINT),
         no_evidence=coverage_items(record, gaps, GapType.NO_EVIDENCE),
         verdict_style=verdict_style(record.final_status),
@@ -1806,6 +2128,13 @@ def render_document(
     action_plan: dict | None = None,
     could_not_read: Sequence[CouldNotRead] = (),
     row_signoff: Sequence[RowSignOff] = (),
+    comparison: dict | None = None,
+    no_comparison: str | None = None,
+    previous: Record | None = None,
+    continuity: dict | None = None,
+    no_continuity: str | None = None,
+    standards: dict | None = None,
+    standards_images: dict[str, ResolvedImage] | None = None,
 ) -> tuple[Path, PageMap]:
     """Render one run to a PDF, and report where each section landed in it.
 
@@ -1827,7 +2156,7 @@ def render_document(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / f"report_{record.run_id}.pdf"
-    switches = switches_for(config, executive_summary, coverage_statement, action_plan)
+    switches = switches_for(config, executive_summary, coverage_statement, action_plan, standards)
     stylesheets = [
         CSS(filename=str(stylesheet_path(config))),
         CSS(string=runtime_css(config, footer, header_lines(record))),
@@ -1842,7 +2171,8 @@ def render_document(
             html = render_html(
                 record, gaps, derived, grids, config, Path(image_dir), rows, executive_summary,
                 section_intros, item_notes, coverage_statement, action_plan, could_not_read,
-                row_signoff,
+                row_signoff, comparison, no_comparison, previous, continuity, no_continuity,
+                standards, standards_images,
             )
             document = HTML(string=html, base_url=str(TEMPLATE_DIR)).render(
                 stylesheets=stylesheets,

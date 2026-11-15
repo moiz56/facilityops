@@ -15,6 +15,9 @@ provenance:                        # stamped into every page footer and the mani
 manifest:
   version: "1.0"                  
 
+comparison:                        # this run against the run before it on the same route
+  version: "1.0"                   # comparison_version, the shape of the comparison
+
 paths:
   path_prefix: /run-files          # stripped from evidence_images before joining evidence_root
 
@@ -109,6 +112,13 @@ sections:
                                    # its page. Optional, off when absent; reads the same files
   action_plan: true                # true: B-3's action plan as its own section after the summary page.
                                    # Optional, off when absent; reads config/action_mapping.yaml too
+  comparison: true                 # true: this run against the run before it on the same route.
+                                   # Optional, on when absent. false also leaves the manifest's comparison empty
+  continuity: true                 # true: the route's continuity score up to this run.
+                                   # Optional, on when absent
+  standards: true                  # true: findings against the clauses of the standards packs the
+                                   # facility's tenant enables in tenants.yaml. Renders only when one is
+                                   # enabled. Optional, on when absent. false also leaves the manifest's standards null
 
 branding:
   stylesheet: styles.css           # a file in src/report/templates/: styles.css or style_default.css
